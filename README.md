@@ -21,6 +21,16 @@ cursor/           # Cursor cloud-agent style image
 Justfile          # local build recipes
 ```
 
+## Install
+
+On a fresh Ubuntu host (as root / with sudo), run:
+
+```bash
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh)
+```
+
+Requires `curl`, `gnupg`, and `ca-certificates`.
+
 ## Build
 
 ```bash
