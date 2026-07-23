@@ -1,0 +1,12 @@
+{
+  "description": "Agent runtime containers for coding harnesses (Cursor first), with Docker, mise, and direnv installed and hooked into the shell by default.",
+  "homepage": "https://github.com/iloveitaly/agent-containers",
+  "keywords": [
+    "agent",
+    "cursor",
+    "docker",
+    "mise",
+    "direnv",
+    "containers"
+  ]
+}
