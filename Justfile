@@ -4,6 +4,18 @@ set shell := ["zsh", "-cu", "-o", "pipefail"]
 build-cursor:
 	docker build -t agent-container-cursor:local -f cursor/Dockerfile cursor
 
+# Smoke-test the image: clone railpack, mise install, and build
+[script]
+test: build-cursor
+	docker run --rm agent-container-cursor:local bash -lc '
+	  set -euo pipefail
+	  export HOME=/home/ubuntu
+	  eval "$(mise activate bash)"
+	  git clone --depth 1 https://github.com/iloveitaly/railpack.git /tmp/railpack
+	  cd /tmp/railpack
+	  mise trust && mise install && mise run build
+	'
+
 # set publish permissions, update metadata, and protect master; all in one command
 github_setup: github_repo_permissions_create github_repo_set_metadata github_ruleset_protect_master_create
 

@@ -39,14 +39,10 @@ just build-cursor
 
 Produces `agent-container-cursor:local`.
 
-## Smoke test
+## Test
 
 ```bash
-docker run --rm agent-container-cursor:local bash -lc '
-  export HOME=/home/ubuntu
-  eval "$(mise activate bash)"
-  git clone --depth 1 https://github.com/iloveitaly/railpack.git /tmp/railpack
-  cd /tmp/railpack
-  mise trust && mise install && mise run build
-'
+just test
 ```
+
+Builds the image (if needed), then clones [railpack](https://github.com/iloveitaly/railpack) inside the container and runs `mise install` + `mise run build`.
