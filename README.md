@@ -45,6 +45,15 @@ Point `.cursor/environment.json` at the same one-liner so cloud agents get Docke
 
 This repo already includes that config under `.cursor/environment.json`. Copy the same snippet into other repos to reuse this environment without vendoring the scripts.
 
+## Docker
+
+Prebuilt multi-arch image (`linux/amd64`, `linux/arm64`) on GHCR:
+
+```bash
+docker pull ghcr.io/iloveitaly/ubuntu-docker-mise-direnv:latest
+docker run --rm -it ghcr.io/iloveitaly/ubuntu-docker-mise-direnv:latest bash -l
+```
+
 ## Build
 
 ```bash
