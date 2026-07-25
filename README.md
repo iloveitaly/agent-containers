@@ -15,21 +15,35 @@ That means:
 ## Layout
 
 ```
-cursor/           # Cursor cloud-agent style image
-  Dockerfile      # Ubuntu 24.04 LTS base
-  install.sh      # Docker, ubuntu user, mise, direnv
-Justfile          # local build recipes
+.cursor/
+  environment.json  # Cursor Cloud Agent install hook
+cursor/             # Cursor cloud-agent style image
+  Dockerfile        # Ubuntu 24.04 LTS base
+  install.sh        # Docker, ubuntu user, mise, direnv
+Justfile            # local build recipes
 ```
 
 ## Install
 
-On a fresh Ubuntu host (as root / with sudo), run:
+On a fresh Ubuntu host (as root), run:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh)
+curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash
 ```
 
 Requires `curl`, `gnupg`, and `ca-certificates`.
+
+### Cursor Cloud Agents
+
+Point `.cursor/environment.json` at the same one-liner so cloud agents get Docker, mise, and direnv on startup:
+
+```json
+{
+  "install": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash"
+}
+```
+
+This repo already includes that config under `.cursor/environment.json`. Copy the same snippet into other repos to reuse this environment without vendoring the scripts.
 
 ## Build
 
@@ -37,7 +51,7 @@ Requires `curl`, `gnupg`, and `ca-certificates`.
 just build-cursor
 ```
 
-Produces `agent-container-cursor:local`.
+Produces `ubuntu-docker-mise-direnv:local`.
 
 ## Test
 

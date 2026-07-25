@@ -2,12 +2,12 @@ set shell := ["zsh", "-cu", "-o", "pipefail"]
 
 # Build the Cursor agent container image
 build-cursor:
-	docker build -t agent-container-cursor:local -f cursor/Dockerfile cursor
+	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
 # Smoke-test the image: clone railpack, mise install, and build
 [script]
 test: build-cursor
-	docker run --rm agent-container-cursor:local bash -lc '
+	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  export HOME=/home/ubuntu
 	  eval "$(mise activate bash)"
