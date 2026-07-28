@@ -63,12 +63,15 @@ export HOME="$(getent passwd ubuntu | cut -d: -f6)"
 #   wait'0a' — PATH/tooling needed ASAP (mise)
 # Shell hook must run before direnv.
 
-curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
-# Activate mise for interactive shells (bash + zsh). mise first, matching wait'0a'.
-touch "$HOME/.bashrc" "$HOME/.zshrc"
-printf '%s\n' 'eval "$(mise activate bash)"' >> "$HOME/.bashrc"
-printf '%s\n' 'eval "$(mise activate zsh)"' >> "$HOME/.zshrc"
-chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
+# Install mise only if the mise CLI is not already present
+if ! command -v mise >/dev/null 2>&1; then
+  curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
+  # Activate mise for interactive shells (bash + zsh). mise first, matching wait'0a'.
+  touch "$HOME/.bashrc" "$HOME/.zshrc"
+  printf '%s\n' 'eval "$(mise activate bash)"' >> "$HOME/.bashrc"
+  printf '%s\n' 'eval "$(mise activate zsh)"' >> "$HOME/.zshrc"
+  chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
+fi
 
 ########################################################
 # DIRENV INSTALL
@@ -77,8 +80,12 @@ chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
 #   wait'0b' — after mise (see 0b/direnv.zsh)
 # Hook must run after mise so direnv inherits the mise-managed PATH.
 
-apt-get update && apt-get install -y direnv && rm -rf /var/lib/apt/lists/*
-# Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
-printf '%s\n' 'eval "$(direnv hook bash)"' >> "$HOME/.bashrc"
-printf '%s\n' 'eval "$(direnv hook zsh)"' >> "$HOME/.zshrc"
-chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
+# Install direnv only if the direnv CLI is not already present
+if ! command -v direnv >/dev/null 2>&1; then
+  apt-get update && apt-get install -y direnv && rm -rf /var/lib/apt/lists/*
+  # Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
+  touch "$HOME/.bashrc" "$HOME/.zshrc"
+  printf '%s\n' 'eval "$(direnv hook bash)"' >> "$HOME/.bashrc"
+  printf '%s\n' 'eval "$(direnv hook zsh)"' >> "$HOME/.zshrc"
+  chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
+fi
