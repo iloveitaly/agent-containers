@@ -37,22 +37,13 @@ Requires `curl`, `gnupg`, and `ca-certificates`.
 
 ### Cursor Cloud Agents
 
-Point `.cursor/environment.json` at the same curl one-liners so cloud agents get Docker, mise, and direnv on startup, then bring the daemon up each session:
-
-```json
-{
-  "install": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash",
-  "start": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/start.sh | bash"
-}
-```
+This repo ships [`.cursor/environment.json`](.cursor/environment.json), which curls [`cursor/install.sh`](cursor/install.sh) on install and [`cursor/start.sh`](cursor/start.sh) on start. Copy that file into other repos to reuse this environment without vendoring the scripts.
 
 `install` only packages and configures Docker — it does not start the daemon. Cursor expects long-lived services in [`start`](https://cursor.com/docs/cloud-agent/setup#running-docker); without it, `docker` fails with a missing daemon.
 
 `start.sh` starts dockerd and opens `/var/run/docker.sock` for the current session. `usermod -aG docker ubuntu` from `install.sh` does not take effect until a new login, so without the chmod agents still hit socket permission errors.
 
 `install.sh` also installs **zsh** as the `ubuntu` user's default shell, and writes global mise/direnv config so anything under `/workspace` is trusted without `mise trust` or `direnv allow`.
-
-This repo already includes that config under `.cursor/environment.json`. Copy the same snippet into other repos to reuse this environment without vendoring the scripts.
 
 ## Docker
 
