@@ -25,9 +25,11 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.
 
   apt-get update && apt-get install -y fuse-overlayfs && rm -rf /var/lib/apt/lists/*
   mkdir -p /etc/docker
-  printf '%s\n' '{' \
-    '  "storage-driver": "fuse-overlayfs"' \
-    '}' > /etc/docker/daemon.json
+  cat > /etc/docker/daemon.json <<'EOF'
+{
+  "storage-driver": "fuse-overlayfs"
+}
+EOF
   apt-get update && apt-get install -y iptables && rm -rf /var/lib/apt/lists/*
   update-alternatives --set iptables /usr/sbin/iptables-legacy
   update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
@@ -37,14 +39,22 @@ fi
 # CONFIG UBUNTU USER
 ########################################################
 
+# Justfile and agent shells expect zsh; install it before creating/updating the user.
+if ! command -v zsh >/dev/null 2>&1; then
+  apt-get update && apt-get install -y zsh && rm -rf /var/lib/apt/lists/*
+fi
+
 # ensure no password authentication
 mkdir -p /etc/ssh/sshd_config.d
-echo 'PasswordAuthentication no
+cat > /etc/ssh/sshd_config.d/disable_password_auth.conf <<'EOF'
+PasswordAuthentication no
 ChallengeResponseAuthentication no
-UsePAM no' > /etc/ssh/sshd_config.d/disable_password_auth.conf
+UsePAM no
+EOF
 
-# Create non-root user (only if it doesn't exist)
-id -u ubuntu &>/dev/null || useradd -m -s /bin/bash ubuntu
+# Create non-root user (only if it doesn't exist); default shell is zsh.
+id -u ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu
+chsh -s /bin/zsh ubuntu
 # Create docker group if it doesn't exist and add ubuntu user to it
 groupadd -f docker && usermod -aG docker ubuntu
 usermod -aG sudo ubuntu
@@ -55,6 +65,7 @@ echo "ubuntu:ubuntu" | chpasswd
 
 # Script runs as root during image build; point HOME at the ubuntu user.
 export HOME="$(getent passwd ubuntu | cut -d: -f6)"
+touch "$HOME/.bashrc" "$HOME/.zshrc"
 
 ########################################################
 # MISE INSTALL
@@ -68,10 +79,20 @@ if ! command -v mise >/dev/null 2>&1; then
   curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
   # Activate mise for interactive shells (bash + zsh). mise first, matching wait'0a'.
   touch "$HOME/.bashrc" "$HOME/.zshrc"
-  printf '%s\n' 'eval "$(mise activate bash)"' >> "$HOME/.bashrc"
-  printf '%s\n' 'eval "$(mise activate zsh)"' >> "$HOME/.zshrc"
-  chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
+  cat >> "$HOME/.bashrc" <<'EOF'
+eval "$(mise activate bash)"
+EOF
+  cat >> "$HOME/.zshrc" <<'EOF'
+eval "$(mise activate zsh)"
+EOF
 fi
+# Cursor cloud agents mount the repo at /workspace — trust configs there without prompts.
+mkdir -p "$HOME/.config/mise"
+cat > "$HOME/.config/mise/config.toml" <<'EOF'
+[settings]
+trusted_config_paths = ["/workspace"]
+EOF
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
 ########################################################
 # DIRENV INSTALL
@@ -85,7 +106,17 @@ if ! command -v direnv >/dev/null 2>&1; then
   apt-get update && apt-get install -y direnv && rm -rf /var/lib/apt/lists/*
   # Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
   touch "$HOME/.bashrc" "$HOME/.zshrc"
-  printf '%s\n' 'eval "$(direnv hook bash)"' >> "$HOME/.bashrc"
-  printf '%s\n' 'eval "$(direnv hook zsh)"' >> "$HOME/.zshrc"
-  chown ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc"
+  cat >> "$HOME/.bashrc" <<'EOF'
+eval "$(direnv hook bash)"
+EOF
+  cat >> "$HOME/.zshrc" <<'EOF'
+eval "$(direnv hook zsh)"
+EOF
 fi
+# Whitelist /workspace so .envrc loads without `direnv allow` on first shell.
+mkdir -p "$HOME/.config/direnv"
+cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
+[whitelist]
+prefix = ["/workspace"]
+EOF
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
