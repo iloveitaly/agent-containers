@@ -23,16 +23,24 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-# archive.ubuntu.com (Cloudflare) sometimes returns 400 on individual .deb fetches.
+# archive.ubuntu.com (Cloudflare) sometimes 400s a single .deb. Retry after
+# repairing a half-unpacked dpkg state. Force conffile defaults so fuse3 does
+# not prompt on an existing /etc/fuse.conf (Cloud Agent images already have one).
 apt_install() {
   local attempt=1
   local max=6
+  local dpkg_opts=(
+    -o Dpkg::Options::=--force-confdef
+    -o Dpkg::Options::=--force-confold
+  )
   while true; do
     apt-get update
-    if apt-get install -y --fix-missing "$@"; then
+    if apt-get install "${dpkg_opts[@]}" -y --fix-missing "$@"; then
       rm -rf /var/lib/apt/lists/*
       return 0
     fi
+    dpkg --configure -a || true
+    apt-get "${dpkg_opts[@]}" -f install -y || true
     if [ "$attempt" -ge "$max" ]; then
       echo "apt-get install failed after ${max} attempts: $*" >&2
       return 1
@@ -63,15 +71,15 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.
     docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble \
     containerd.io \
     docker-buildx-plugin \
-    docker-compose-plugin \
-    fuse-overlayfs \
-    iptables
+    docker-compose-plugin
+  apt_install fuse-overlayfs
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
 {
   "storage-driver": "fuse-overlayfs"
 }
 EOF
+  apt_install iptables
   update-alternatives --set iptables /usr/sbin/iptables-legacy
   update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 fi
