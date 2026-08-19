@@ -37,20 +37,11 @@ Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 ### Cursor Cloud Agents
 
-This repo ships [`.cursor/environment.json`](.cursor/environment.json) with **only** `install` and `start` (no `build.dockerfile`). Cursor Cloud runs those as `ubuntu` on the default image.
+This repo ships [`.cursor/environment.json`](.cursor/environment.json) with **only** `install` and `start` (no `build.dockerfile`). Both commands `curl | bash` the scripts from `master` so you can copy that file into other repos without vendoring `cursor/`.
 
 [`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, and **direnv**, and trusts `/workspace`.
 
 [`cursor/start.sh`](cursor/start.sh) runs `sudo service docker start`, waits for `/var/run/docker.sock`, and `chmod`s it for the current session. `usermod -aG docker ubuntu` from install does not apply until a new login. Builds keep disk state only, so the daemon must start in `start`.
-
-To reuse this in another repo without vendoring the scripts:
-
-```json
-{
-  "install": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash",
-  "start": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/start.sh | bash"
-}
-```
 
 ## Docker
 
