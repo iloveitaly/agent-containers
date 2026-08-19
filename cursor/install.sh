@@ -23,40 +23,24 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-# archive.ubuntu.com (Cloudflare) sometimes 400s a single .deb. Retry after
-# repairing a half-unpacked dpkg state. Force conffile defaults so fuse3 does
-# not prompt on an existing /etc/fuse.conf (Cloud Agent images already have one).
-apt_install() {
-  local attempt=1
-  local max=6
-  local dpkg_opts=(
-    -o Dpkg::Options::=--force-confdef
-    -o Dpkg::Options::=--force-confold
-  )
-  while true; do
-    apt-get update
-    if apt-get install "${dpkg_opts[@]}" -y --fix-missing "$@"; then
-      rm -rf /var/lib/apt/lists/*
-      return 0
-    fi
-    dpkg --configure -a || true
-    apt-get "${dpkg_opts[@]}" -f install -y || true
-    if [ "$attempt" -ge "$max" ]; then
-      echo "apt-get install failed after ${max} attempts: $*" >&2
-      return 1
-    fi
-    echo "apt-get install failed (attempt ${attempt}/${max}), retrying..." >&2
-    sleep $((attempt * 3))
-    attempt=$((attempt + 1))
-  done
-}
+# Retry individual .deb fetches (archive.ubuntu.com/Cloudflare 400s) instead of
+# re-running the whole install. Keep existing /etc/fuse.conf on Cloud images.
+cat > /etc/apt/apt.conf.d/99-install-retries <<'EOF'
+Acquire::Retries "5";
+Acquire::http::Timeout "30";
+Dpkg::Options { "--force-confdef"; "--force-confold"; };
+EOF
+
+packages=()
+need_docker=false
+need_direnv=false
 
 ########################################################
-# DOCKER INSTALLATION
+# DOCKER APT SOURCE
 ########################################################
 
-# Install Docker only if the docker CLI is not already present
 if ! command -v docker >/dev/null 2>&1; then
+  need_docker=true
   install -m 0755 -d /etc/apt/keyrings /root/.gnupg
   chmod 700 /root/.gnupg
   # --batch/--yes: overwrite without prompting (no /dev/tty in Cloud Agent install).
@@ -66,20 +50,43 @@ if ! command -v docker >/dev/null 2>&1; then
   chmod a+r /etc/apt/keyrings/docker.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-  apt_install \
-    docker-ce=5:28.5.2-1~ubuntu.24.04~noble \
-    docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble \
-    containerd.io \
-    docker-buildx-plugin \
+  packages+=(
+    docker-ce=5:28.5.2-1~ubuntu.24.04~noble
+    docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble
+    containerd.io
+    docker-buildx-plugin
     docker-compose-plugin
-  apt_install fuse-overlayfs
+    fuse-overlayfs
+    iptables
+  )
+fi
+
+if ! command -v zsh >/dev/null 2>&1; then
+  packages+=(zsh)
+fi
+
+if ! command -v direnv >/dev/null 2>&1; then
+  need_direnv=true
+  packages+=(direnv)
+fi
+
+if ((${#packages[@]})); then
+  apt-get update
+  apt-get install -y -- "${packages[@]}"
+  rm -rf /var/lib/apt/lists/*
+fi
+
+########################################################
+# DOCKER DAEMON CONFIG
+########################################################
+
+if $need_docker; then
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
 {
   "storage-driver": "fuse-overlayfs"
 }
 EOF
-  apt_install iptables
   update-alternatives --set iptables /usr/sbin/iptables-legacy
   update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 fi
@@ -87,11 +94,6 @@ fi
 ########################################################
 # CONFIG UBUNTU USER
 ########################################################
-
-# Justfile and agent shells expect zsh; install it before creating/updating the user.
-if ! command -v zsh >/dev/null 2>&1; then
-  apt_install zsh
-fi
 
 # ensure no password authentication
 mkdir -p /etc/ssh/sshd_config.d
@@ -144,15 +146,13 @@ EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
 ########################################################
-# DIRENV INSTALL
+# DIRENV HOOKS
 ########################################################
 # Load order guide (iloveitaly/dotfiles .zsh_plugins):
 #   wait'0b' — after mise (see 0b/direnv.zsh)
 # Hook must run after mise so direnv inherits the mise-managed PATH.
 
-# Install direnv only if the direnv CLI is not already present
-if ! command -v direnv >/dev/null 2>&1; then
-  apt_install direnv
+if $need_direnv; then
   # Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
   touch "$HOME/.bashrc" "$HOME/.zshrc"
   cat >> "$HOME/.bashrc" <<'EOF'
