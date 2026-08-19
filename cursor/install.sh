@@ -72,7 +72,17 @@ fi
 
 if ((${#packages[@]})); then
   apt-get update
-  apt-get install -y -- "${packages[@]}"
+  # Acquire::Retries covers dropped connections, not HTTP 400 from
+  # archive.ubuntu.com/Cloudflare. Retry the install only — lists stay cached.
+  attempt=1
+  until apt-get install -y -- "${packages[@]}"; do
+    if ((attempt >= 5)); then
+      echo "apt-get install failed after ${attempt} attempts: ${packages[*]}" >&2
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
   rm -rf /var/lib/apt/lists/*
 fi
 
