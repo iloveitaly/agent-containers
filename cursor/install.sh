@@ -23,6 +23,26 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+# archive.ubuntu.com (Cloudflare) sometimes returns 400 on individual .deb fetches.
+apt_install() {
+  local attempt=1
+  local max=6
+  while true; do
+    apt-get update
+    if apt-get install -y --fix-missing "$@"; then
+      rm -rf /var/lib/apt/lists/*
+      return 0
+    fi
+    if [ "$attempt" -ge "$max" ]; then
+      echo "apt-get install failed after ${max} attempts: $*" >&2
+      return 1
+    fi
+    echo "apt-get install failed (attempt ${attempt}/${max}), retrying..." >&2
+    sleep $((attempt * 3))
+    attempt=$((attempt + 1))
+  done
+}
+
 ########################################################
 # DOCKER INSTALLATION
 ########################################################
@@ -38,23 +58,20 @@ if ! command -v docker >/dev/null 2>&1; then
   chmod a+r /etc/apt/keyrings/docker.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-  apt-get update
-  apt-get install -y \
+  apt_install \
     docker-ce=5:28.5.2-1~ubuntu.24.04~noble \
     docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble \
     containerd.io \
     docker-buildx-plugin \
-    docker-compose-plugin
-  rm -rf /var/lib/apt/lists/*
-
-  apt-get update && apt-get install -y fuse-overlayfs && rm -rf /var/lib/apt/lists/*
+    docker-compose-plugin \
+    fuse-overlayfs \
+    iptables
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
 {
   "storage-driver": "fuse-overlayfs"
 }
 EOF
-  apt-get update && apt-get install -y iptables && rm -rf /var/lib/apt/lists/*
   update-alternatives --set iptables /usr/sbin/iptables-legacy
   update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 fi
@@ -65,7 +82,7 @@ fi
 
 # Justfile and agent shells expect zsh; install it before creating/updating the user.
 if ! command -v zsh >/dev/null 2>&1; then
-  apt-get update && apt-get install -y zsh && rm -rf /var/lib/apt/lists/*
+  apt_install zsh
 fi
 
 # ensure no password authentication
@@ -127,7 +144,7 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
 # Install direnv only if the direnv CLI is not already present
 if ! command -v direnv >/dev/null 2>&1; then
-  apt-get update && apt-get install -y direnv && rm -rf /var/lib/apt/lists/*
+  apt_install direnv
   # Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
   touch "$HOME/.bashrc" "$HOME/.zshrc"
   cat >> "$HOME/.bashrc" <<'EOF'
