@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Cursor Cloud `install` runs as ubuntu (passwordless sudo). Docker image
+# builds and "fresh Ubuntu host" runs are already root. Re-exec so apt/gpg
+# can write /etc/apt/keyrings and the rest of this script can run as root.
+if [ "$(id -u)" -ne 0 ]; then
+  if ! sudo -n true 2>/dev/null; then
+    echo "install.sh must run as root or with passwordless sudo" >&2
+    exit 1
+  fi
+  # `curl | bash` feeds the script on stdin ($0 is bash /usr/bin/bash).
+  # `bash cursor/install.sh` has a real script path in $0.
+  case "$0" in
+    bash|sh|-|*/bash|*/sh)
+      exec sudo -n -E bash -s "$@"
+      ;;
+    *)
+      exec sudo -n -E bash "$0" "$@"
+      ;;
+  esac
+fi
+
 export DEBIAN_FRONTEND=noninteractive
 
 ########################################################

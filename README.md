@@ -27,17 +27,28 @@ Justfile            # local build recipes
 
 ## Install
 
-On a fresh Ubuntu host (as root), run:
+On a fresh Ubuntu host, run as root (or as a user with passwordless sudo):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash
 ```
 
-Requires `curl`, `gnupg`, and `ca-certificates`.
+Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 ### Cursor Cloud Agents
 
-This repo ships [`.cursor/environment.json`](.cursor/environment.json), which curls [`cursor/install.sh`](cursor/install.sh) on install and [`cursor/start.sh`](cursor/start.sh) on start. Copy that file into other repos to reuse this environment without vendoring the scripts.
+This repo ships [`.cursor/environment.json`](.cursor/environment.json), which runs the checked-out [`cursor/install.sh`](cursor/install.sh) on install and [`cursor/start.sh`](cursor/start.sh) on start.
+
+Cursor Cloud runs `install` as the `ubuntu` user, not root. `install.sh` re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings`. Without that, `gpg --dearmor -o /etc/apt/keyrings/docker.gpg` fails with `Permission denied`.
+
+To reuse this environment in another repo without vendoring the scripts:
+
+```json
+{
+  "install": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash",
+  "start": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/start.sh | bash"
+}
+```
 
 `install` only packages and configures Docker — it does not start the daemon. Cursor expects long-lived services in [`start`](https://cursor.com/docs/cloud-agent/setup#running-docker); without it, `docker` fails with a missing daemon.
 
