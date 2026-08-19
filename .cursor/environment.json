@@ -1,10 +1,4 @@
 {
-  "name": "ubuntu-docker-mise-direnv",
-  "build": {
-    "dockerfile": "../cursor/Dockerfile",
-    "context": "../cursor"
-  },
-  "user": "ubuntu",
-  "install": "true",
+  "install": "bash cursor/install.sh",
   "start": "bash cursor/start.sh"
 }

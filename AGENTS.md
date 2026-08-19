@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-Docker is installed in [`cursor/Dockerfile`](cursor/Dockerfile) (via `install.sh` as root). Do not install Docker in the Cloud `install` hook. Per boot, [`cursor/start.sh`](cursor/start.sh) runs `sudo service docker start`. See [Running Docker](https://cursor.com/docs/cloud-agent/setup#running-docker).
+This environment uses `install` + `start` only (no Dockerfile). [`cursor/install.sh`](cursor/install.sh) installs Docker/mise/direnv via passwordless sudo. [`cursor/start.sh`](cursor/start.sh) starts dockerd each boot.
 
 ## mise documentation
 

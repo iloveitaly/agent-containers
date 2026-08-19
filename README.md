@@ -17,9 +17,9 @@ That means:
 
 ```
 .cursor/
-  environment.json  # Cursor Cloud: Dockerfile base + start dockerd
+  environment.json  # Cursor Cloud install + start (no Dockerfile)
 cursor/             # Cursor cloud-agent style image
-  Dockerfile        # Ubuntu 24.04 LTS; RUN install.sh as root
+  Dockerfile        # Ubuntu 24.04 LTS; RUN install.sh as root (GHCR / local just)
   install.sh        # Docker, zsh, ubuntu user, mise, direnv (+ /workspace trust)
   start.sh          # Start dockerd + open docker.sock for the session
 Justfile            # local build recipes
@@ -37,13 +37,20 @@ Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 ### Cursor Cloud Agents
 
-Current Cursor docs ([Running Docker](https://cursor.com/docs/cloud-agent/setup#running-docker)) install Docker in the **environment Dockerfile** (root, image build), not in the Cloud `install` hook. `install` runs as `ubuntu` and cannot write `/etc/apt/keyrings/docker.gpg`. Nested Docker also needs `fuse-overlayfs` and `iptables-legacy`. Start the daemon per boot with `sudo service docker start` in `start` — Builds keep disk state only, not running processes.
+This repo ships [`.cursor/environment.json`](.cursor/environment.json) with **only** `install` and `start` (no `build.dockerfile`). Cursor Cloud runs those as `ubuntu` on the default image.
 
-This repo's [`.cursor/environment.json`](.cursor/environment.json) follows that layout: `build` points at [`cursor/Dockerfile`](cursor/Dockerfile) (which `RUN`s [`install.sh`](cursor/install.sh) as root), `install` is a no-op, and [`cursor/start.sh`](cursor/start.sh) starts dockerd.
+[`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, and **direnv**, and trusts `/workspace`.
 
-`start.sh` waits for `/var/run/docker.sock` and `chmod`s it for the current session. `usermod -aG docker ubuntu` from image build does not apply until a new login, so without the chmod agents still hit socket permission errors.
+[`cursor/start.sh`](cursor/start.sh) runs `sudo service docker start`, waits for `/var/run/docker.sock`, and `chmod`s it for the current session. `usermod -aG docker ubuntu` from install does not apply until a new login. Builds keep disk state only, so the daemon must start in `start`.
 
-`install.sh` also installs **zsh** as the `ubuntu` user's default shell, and writes global mise/direnv config so anything under `/workspace` is trusted without `mise trust` or `direnv allow`.
+To reuse this in another repo without vendoring the scripts:
+
+```json
+{
+  "install": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/install.sh | bash",
+  "start": "curl -fsSL https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/start.sh | bash"
+}
+```
 
 ## Docker
 
