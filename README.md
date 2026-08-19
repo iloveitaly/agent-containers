@@ -37,7 +37,7 @@ Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 ### Cursor Cloud Agents
 
-This repo ships [`.cursor/environment.json`](.cursor/environment.json) with **only** `install` and `start` (no `build.dockerfile`). Both commands `curl | bash` the scripts from `master` so you can copy that file into other repos without vendoring `cursor/`.
+Copy [`.cursor/environment.json`](.cursor/environment.json) into other repos. It has **only** `install` and `start` (no `build.dockerfile`) and `curl | bash`s the scripts from `master`.
 
 [`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, and **direnv**, and trusts `/workspace`.
 
