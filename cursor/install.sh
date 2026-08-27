@@ -23,11 +23,13 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Retry individual .deb fetches (archive.ubuntu.com/Cloudflare 400s) instead of
-# re-running the whole install. Keep existing /etc/fuse.conf on Cloud images.
+# Written to /etc/apt so later apt-get in this script picks it up.
 cat > /etc/apt/apt.conf.d/99-install-retries <<'EOF'
+// Retry a fetch that dropped or got HTTP 5xx. Does not retry HTTP 400.
 Acquire::Retries "5";
+// Give up on a hung HTTP fetch after 30s instead of hanging the install.
 Acquire::http::Timeout "30";
+// Cloud images already have /etc/fuse.conf. Keep it; never prompt.
 Dpkg::Options { "--force-confdef"; "--force-confold"; };
 EOF
 
