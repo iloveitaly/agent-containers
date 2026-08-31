@@ -1,36 +1,104 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Cursor Cloud `install` runs as ubuntu (passwordless sudo). Docker image
+# builds and "fresh Ubuntu host" runs are already root. Re-exec so apt/gpg
+# can write /etc/apt/keyrings and the rest of this script can run as root.
+if [ "$(id -u)" -ne 0 ]; then
+  if ! sudo -n true 2>/dev/null; then
+    echo "install.sh must run as root or with passwordless sudo" >&2
+    exit 1
+  fi
+  # `curl | bash` feeds the script on stdin ($0 is bash /usr/bin/bash).
+  # `bash cursor/install.sh` has a real script path in $0.
+  case "$0" in
+    bash|sh|-|*/bash|*/sh)
+      exec sudo -n -E bash -s "$@"
+      ;;
+    *)
+      exec sudo -n -E bash "$0" "$@"
+      ;;
+  esac
+fi
+
 export DEBIAN_FRONTEND=noninteractive
 
+# Written to /etc/apt so later apt-get in this script picks it up.
+cat > /etc/apt/apt.conf.d/99-install-retries <<'EOF'
+// Retry a fetch that dropped or got HTTP 5xx. Does not retry HTTP 400.
+Acquire::Retries "5";
+// Give up on a hung HTTP fetch after 30s instead of hanging the install.
+Acquire::http::Timeout "30";
+// Cloud images already have /etc/fuse.conf. Keep it; never prompt.
+Dpkg::Options { "--force-confdef"; "--force-confold"; };
+EOF
+
+packages=()
+need_docker=false
+need_direnv=false
+
 ########################################################
-# DOCKER INSTALLATION
+# DOCKER APT SOURCE
 ########################################################
 
-# Install Docker only if the docker CLI is not already present
 if ! command -v docker >/dev/null 2>&1; then
-  install -m 0755 -d /etc/apt/keyrings
-  curl --retry 3 --retry-delay 5 -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+  need_docker=true
+  install -m 0755 -d /etc/apt/keyrings /root/.gnupg
+  chmod 700 /root/.gnupg
+  # --batch/--yes: overwrite without prompting (no /dev/tty in Cloud Agent install).
+  # GNUPGHOME under /root avoids "unsafe ownership" when HOME is still ubuntu's.
+  curl --retry 3 --retry-delay 5 -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | gpg --homedir /root/.gnupg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
   chmod a+r /etc/apt/keyrings/docker.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
 $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-  apt-get update
-  apt-get install -y \
-    docker-ce=5:28.5.2-1~ubuntu.24.04~noble \
-    docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble \
-    containerd.io \
-    docker-buildx-plugin \
+  packages+=(
+    docker-ce=5:28.5.2-1~ubuntu.24.04~noble
+    docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble
+    containerd.io
+    docker-buildx-plugin
     docker-compose-plugin
-  rm -rf /var/lib/apt/lists/*
+    fuse-overlayfs
+    iptables
+  )
+fi
 
-  apt-get update && apt-get install -y fuse-overlayfs && rm -rf /var/lib/apt/lists/*
+if ! command -v zsh >/dev/null 2>&1; then
+  packages+=(zsh)
+fi
+
+if ! command -v direnv >/dev/null 2>&1; then
+  need_direnv=true
+  packages+=(direnv)
+fi
+
+if ((${#packages[@]})); then
+  apt-get update
+  # Acquire::Retries covers dropped connections, not HTTP 400 from
+  # archive.ubuntu.com/Cloudflare. Retry the install only — lists stay cached.
+  attempt=1
+  until apt-get install -y -- "${packages[@]}"; do
+    if ((attempt >= 5)); then
+      echo "apt-get install failed after ${attempt} attempts: ${packages[*]}" >&2
+      exit 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+  done
+  rm -rf /var/lib/apt/lists/*
+fi
+
+########################################################
+# DOCKER DAEMON CONFIG
+########################################################
+
+if $need_docker; then
   mkdir -p /etc/docker
   cat > /etc/docker/daemon.json <<'EOF'
 {
   "storage-driver": "fuse-overlayfs"
 }
 EOF
-  apt-get update && apt-get install -y iptables && rm -rf /var/lib/apt/lists/*
   update-alternatives --set iptables /usr/sbin/iptables-legacy
   update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy
 fi
@@ -38,11 +106,6 @@ fi
 ########################################################
 # CONFIG UBUNTU USER
 ########################################################
-
-# Justfile and agent shells expect zsh; install it before creating/updating the user.
-if ! command -v zsh >/dev/null 2>&1; then
-  apt-get update && apt-get install -y zsh && rm -rf /var/lib/apt/lists/*
-fi
 
 # ensure no password authentication
 mkdir -p /etc/ssh/sshd_config.d
@@ -95,15 +158,13 @@ EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
 ########################################################
-# DIRENV INSTALL
+# DIRENV HOOKS
 ########################################################
 # Load order guide (iloveitaly/dotfiles .zsh_plugins):
 #   wait'0b' — after mise (see 0b/direnv.zsh)
 # Hook must run after mise so direnv inherits the mise-managed PATH.
 
-# Install direnv only if the direnv CLI is not already present
-if ! command -v direnv >/dev/null 2>&1; then
-  apt-get update && apt-get install -y direnv && rm -rf /var/lib/apt/lists/*
+if $need_direnv; then
   # Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
   touch "$HOME/.bashrc" "$HOME/.zshrc"
   cat >> "$HOME/.bashrc" <<'EOF'
