@@ -4,7 +4,7 @@
 
 - `install` + `start` only (no Dockerfile).
 - Keep [`.cursor/environment.json`](.cursor/environment.json) as `curl | bash` against `master`. Copy-paste for other projects; do not use `bash cursor/install.sh`.
-- [`cursor/install.sh`](cursor/install.sh) installs Docker/mise/direnv via passwordless sudo. [`cursor/start.sh`](cursor/start.sh) starts dockerd each boot.
+- [`cursor/install.sh`](cursor/install.sh) installs Docker/mise/direnv/gh/uv plus `iloveitaly/gh-ai-pr` via passwordless sudo. [`cursor/start.sh`](cursor/start.sh) starts dockerd each boot.
 
 ## mise documentation
 

@@ -11,6 +11,9 @@ test: build-cursor
 	  set -euo pipefail
 	  export HOME=/home/ubuntu
 	  eval "$(mise activate bash)"
+	  command -v gh
+	  command -v uv
+	  sudo -u ubuntu -H gh extension list | grep -F iloveitaly/gh-ai-pr
 	  git clone --depth 1 https://github.com/iloveitaly/railpack.git /tmp/railpack
 	  cd /tmp/railpack
 	  mise trust && mise install && mise run build

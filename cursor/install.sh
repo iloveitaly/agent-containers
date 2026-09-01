@@ -72,6 +72,24 @@ if ! command -v direnv >/dev/null 2>&1; then
   packages+=(direnv)
 fi
 
+if ! command -v git >/dev/null 2>&1; then
+  packages+=(git)
+fi
+
+########################################################
+# GITHUB CLI APT SOURCE
+########################################################
+
+if ! command -v gh >/dev/null 2>&1; then
+  install -m 0755 -d /etc/apt/keyrings
+  curl --retry 3 --retry-delay 5 -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  packages+=(gh)
+fi
+
 if ((${#packages[@]})); then
   apt-get update
   # Acquire::Retries covers dropped connections, not HTTP 400 from
@@ -181,3 +199,24 @@ cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 prefix = ["/workspace"]
 EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
+
+########################################################
+# UV (required by gh-ai-pr)
+########################################################
+# gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
+
+if ! command -v uv >/dev/null 2>&1; then
+  curl --retry 3 --retry-delay 5 -fsSL https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL=/usr/local/bin sh
+fi
+
+########################################################
+# GH AI-PR EXTENSION
+########################################################
+# Extensions install into $HOME/.local/share/gh/extensions. The agent
+# session runs as ubuntu, so install as that user (not root).
+
+if command -v gh >/dev/null 2>&1; then
+  if ! sudo -u ubuntu -H gh extension list 2>/dev/null | grep -Fq 'iloveitaly/gh-ai-pr'; then
+    sudo -u ubuntu -H gh extension install iloveitaly/gh-ai-pr
+  fi
+fi
