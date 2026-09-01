@@ -13,7 +13,7 @@ test: build-cursor
 	  eval "$(mise activate bash)"
 	  command -v gh
 	  command -v uv
-	  sudo -u ubuntu -H gh extension list | grep -F iloveitaly/gh-ai-pr
+	  test -x /home/ubuntu/.local/share/gh/extensions/gh-ai-pr/gh-ai-pr
 	  git clone --depth 1 https://github.com/iloveitaly/railpack.git /tmp/railpack
 	  cd /tmp/railpack
 	  mise trust && mise install && mise run build

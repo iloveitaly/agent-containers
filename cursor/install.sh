@@ -214,9 +214,10 @@ fi
 ########################################################
 # Extensions install into $HOME/.local/share/gh/extensions. The agent
 # session runs as ubuntu, so install as that user (not root).
+# Do not use `gh extension list` here: unauthenticated gh (Docker image
+# builds, fresh hosts) exits with "please run: gh auth login".
 
-if command -v gh >/dev/null 2>&1; then
-  if ! sudo -u ubuntu -H gh extension list 2>/dev/null | grep -Fq 'iloveitaly/gh-ai-pr'; then
-    sudo -u ubuntu -H gh extension install iloveitaly/gh-ai-pr
-  fi
+gh_ai_pr_dir="$(getent passwd ubuntu | cut -d: -f6)/.local/share/gh/extensions/gh-ai-pr"
+if command -v gh >/dev/null 2>&1 && [ ! -d "$gh_ai_pr_dir" ]; then
+  sudo -u ubuntu -H gh extension install iloveitaly/gh-ai-pr
 fi
