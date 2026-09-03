@@ -172,6 +172,9 @@ mkdir -p "$HOME/.config/mise"
 cat > "$HOME/.config/mise/config.toml" <<'EOF'
 [settings]
 trusted_config_paths = ["/workspace"]
+
+[tools]
+uv = "latest"
 EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
@@ -201,13 +204,12 @@ EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
 ########################################################
-# UV (required by gh-ai-pr)
+# UV VIA MISE (required by gh-ai-pr)
 ########################################################
+# User-global tool from ~/.config/mise/config.toml (`mise use -g`).
 # gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
 
-if ! command -v uv >/dev/null 2>&1; then
-  curl --retry 3 --retry-delay 5 -fsSL https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL=/usr/local/bin sh
-fi
+sudo -u ubuntu -H mise install
 
 ########################################################
 # GH AI-PR EXTENSION

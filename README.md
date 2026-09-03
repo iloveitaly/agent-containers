@@ -10,9 +10,9 @@ That means:
 
 - **Docker** — docker-in-docker ready (fuse-overlayfs + iptables-legacy), so agents can build and run containers
 - **zsh** — default shell for the `ubuntu` user (Justfiles and agent sessions expect it)
-- **mise** — language/tool version management with shell activation by default; `/workspace` pre-trusted
+- **mise** — language/tool version management with shell activation by default; `/workspace` pre-trusted; [`uv`](https://docs.astral.sh/uv/) is a global mise tool
 - **direnv** — per-directory env loading, hooked *after* mise so PATH stays consistent; `/workspace` whitelisted
-- **GitHub CLI** — `gh` plus [`uv`](https://docs.astral.sh/uv/) and the [`iloveitaly/gh-ai-pr`](https://github.com/iloveitaly/gh-ai-pr) extension for the `ubuntu` user
+- **GitHub CLI** — `gh` plus the [`iloveitaly/gh-ai-pr`](https://github.com/iloveitaly/gh-ai-pr) extension for the `ubuntu` user
 
 ## Layout
 
@@ -21,7 +21,7 @@ That means:
   environment.json  # Cursor Cloud install + start (no Dockerfile)
 cursor/             # Cursor cloud-agent style image
   Dockerfile        # Ubuntu 24.04 LTS; RUN install.sh as root (GHCR / local just)
-  install.sh        # Docker, zsh, ubuntu user, mise, direnv, gh, uv, gh-ai-pr (+ /workspace trust)
+  install.sh        # Docker, zsh, ubuntu user, mise (+ global uv), direnv, gh, gh-ai-pr (+ /workspace trust)
   start.sh          # Start dockerd + open docker.sock for the session
 Justfile            # local build recipes
 ```
@@ -40,7 +40,7 @@ Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 Copy [`.cursor/environment.json`](.cursor/environment.json) into other repos. It has **only** `install` and `start` (no `build.dockerfile`) and `curl | bash`s the scripts from `master`.
 
-[`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, **direnv**, **GitHub CLI** (`gh`), and **uv** when missing, installs the [`iloveitaly/gh-ai-pr`](https://github.com/iloveitaly/gh-ai-pr) extension as `ubuntu`, and trusts `/workspace`.
+[`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, and **direnv** when missing, installs **uv** as a global mise tool (`uv = "latest"` in `~/.config/mise/config.toml`), installs **GitHub CLI** (`gh`) when missing, installs the [`iloveitaly/gh-ai-pr`](https://github.com/iloveitaly/gh-ai-pr) extension as `ubuntu`, and trusts `/workspace`.
 
 [`cursor/start.sh`](cursor/start.sh) runs `sudo service docker start`, waits for `/var/run/docker.sock`, and `chmod`s it for the current session. `usermod -aG docker ubuntu` from install does not apply until a new login. Builds keep disk state only, so the daemon must start in `start`.
 
