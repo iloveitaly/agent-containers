@@ -72,6 +72,24 @@ if ! command -v direnv >/dev/null 2>&1; then
   packages+=(direnv)
 fi
 
+if ! command -v git >/dev/null 2>&1; then
+  packages+=(git)
+fi
+
+########################################################
+# GITHUB CLI APT SOURCE
+########################################################
+
+if ! command -v gh >/dev/null 2>&1; then
+  install -m 0755 -d /etc/apt/keyrings
+  curl --retry 3 --retry-delay 5 -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+  packages+=(gh)
+fi
+
 if ((${#packages[@]})); then
   apt-get update
   # Acquire::Retries covers dropped connections, not HTTP 400 from
@@ -154,6 +172,9 @@ mkdir -p "$HOME/.config/mise"
 cat > "$HOME/.config/mise/config.toml" <<'EOF'
 [settings]
 trusted_config_paths = ["/workspace"]
+
+[tools]
+uv = "latest"
 EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
@@ -181,3 +202,24 @@ cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 prefix = ["/workspace"]
 EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
+
+########################################################
+# UV VIA MISE (required by gh-ai-pr)
+########################################################
+# User-global tool from ~/.config/mise/config.toml (`mise use -g`).
+# gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
+
+sudo -u ubuntu -H mise install
+
+########################################################
+# GH AI-PR EXTENSION
+########################################################
+# Extensions install into $HOME/.local/share/gh/extensions. The agent
+# session runs as ubuntu, so install as that user (not root).
+# Do not use `gh extension list` here: unauthenticated gh (Docker image
+# builds, fresh hosts) exits with "please run: gh auth login".
+
+gh_ai_pr_dir="$(getent passwd ubuntu | cut -d: -f6)/.local/share/gh/extensions/gh-ai-pr"
+if command -v gh >/dev/null 2>&1 && [ ! -d "$gh_ai_pr_dir" ]; then
+  sudo -u ubuntu -H gh extension install iloveitaly/gh-ai-pr
+fi
