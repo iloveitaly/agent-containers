@@ -187,14 +187,7 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 ########################################################
 # Cursor Cloud `install` runs from the repo root (often /workspace). Docker
 # image builds have no project justfile here, so this is a no-op there.
-
-install_just() {
-  if command -v just >/dev/null 2>&1; then
-    return 0
-  fi
-  curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 5 -fsSL https://just.systems/install.sh \
-    | bash -s -- --to /usr/local/bin
-}
+# Do not install just ourselves: projects that need it put it in mise.
 
 # Prefer /workspace (Cursor Cloud) then $PWD. just also searches parents, but
 # we only treat a justfile at the project root as project setup.
@@ -207,12 +200,14 @@ for candidate in /workspace "$PWD"; do
 done
 
 if [ -n "$justfile_dir" ]; then
-  install_just
-  # ubuntu: mise is on PATH via the user's shell rc; recipes often need it.
   sudo -n -u ubuntu -H env JUSTFILE_DIR="$justfile_dir" bash -lc '
     set -euo pipefail
     cd "$JUSTFILE_DIR"
     eval "$(mise activate bash)"
+    if ! command -v just >/dev/null 2>&1; then
+      echo "justfile found in $JUSTFILE_DIR but just is not on PATH; skipping just setup"
+      exit 0
+    fi
     just --list >/dev/null
     if just --show setup >/dev/null 2>&1; then
       echo "Running just setup in $JUSTFILE_DIR"

@@ -5,14 +5,16 @@ build-cursor:
 	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
-# setup recipe / setup recipe). Image build itself has no project justfile.
+# setup recipe / setup without just on PATH / setup with just already on PATH).
+# Image build itself has no project justfile. install.sh does not install just.
 [script]
 test-just-setup: build-cursor
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT
-	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup"
+	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup" "$tmp/setup-with-just"
 	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
+	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup-with-just/Justfile"
 	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  command -v tmux
@@ -40,7 +42,18 @@ test-just-setup: build-cursor
 	  -v "$tmp/setup:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
-	grep -qx ran-setup "$tmp/setup/marker"
+	[ ! -e "$tmp/setup/marker" ]
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/setup-with-just:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash -lc '
+	    set -euo pipefail
+	    curl --proto "=https" --tlsv1.2 --retry 3 --retry-delay 5 -fsSL https://just.systems/install.sh \
+	      | bash -s -- --to /usr/local/bin
+	    bash /tmp/install.sh
+	  '
+	grep -qx ran-setup "$tmp/setup-with-just/marker"
 
 # Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
 [script]
