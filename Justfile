@@ -11,6 +11,11 @@ test: build-cursor
 	  set -euo pipefail
 	  export HOME=/home/ubuntu
 	  eval "$(mise activate bash)"
+	  command -v gh
+	  command -v uv
+	  mise which gh | grep -F '.local/share/mise/installs/gh'
+	  mise which uv | grep -F '.local/share/mise/installs/uv'
+	  test -x /home/ubuntu/.local/share/gh/extensions/gh-ai-pr/gh-ai-pr
 	  git clone --depth 1 https://github.com/iloveitaly/railpack.git /tmp/railpack
 	  cd /tmp/railpack
 	  mise trust && mise install && mise run build
