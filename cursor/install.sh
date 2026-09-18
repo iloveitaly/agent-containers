@@ -200,7 +200,7 @@ for candidate in /workspace "$PWD"; do
 done
 
 if [ -n "$justfile_dir" ]; then
-  sudo -n -u ubuntu -H env JUSTFILE_DIR="$justfile_dir" bash -lc '
+  sudo -n -u ubuntu -H env JUSTFILE_DIR="$justfile_dir" bash -c '
     set -euo pipefail
     cd "$JUSTFILE_DIR"
     eval "$(mise activate bash)"
