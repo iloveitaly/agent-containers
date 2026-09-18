@@ -10,10 +10,11 @@ That means:
 
 - **Docker** — docker-in-docker ready (fuse-overlayfs + iptables-legacy), so agents can build and run containers
 - **zsh** — default shell for the `ubuntu` user (Justfiles and agent sessions expect it)
-- **mise** — language/tool version management with shell activation by default; `/workspace` pre-trusted
+- **mise** — language/tool version management with shell activation by default; `/workspace` pre-trusted; [`uv`](https://docs.astral.sh/uv/) is a global mise tool, and [`gh`](https://cli.github.com/) is added only when it is not already on `PATH`
 - **direnv** — per-directory env loading, hooked *after* mise so PATH stays consistent; `/workspace` whitelisted
 - **just setup** — if the repo has a justfile with a `setup` recipe **and** `mise which just` succeeds, `install.sh` runs `mise exec -- just setup` as `ubuntu`. It does not install `just`.
 - **Cursor-like base** — `cursor/Dockerfile` (GHCR) installs the CLIs the hosted Cloud Agent VM already has: `git`, `sudo`, `locales` (`en_US.UTF-8`), `xz-utils`, `tmux`, `python3`, `jq`, `ripgrep`, `unzip`. Not in `install.sh`, so Cursor Cloud `curl | bash` does not reinstall them.
+- **gh-ai-pr** — [`iloveitaly/gh-ai-pr`](https://github.com/iloveitaly/gh-ai-pr) GitHub CLI extension for the `ubuntu` user
 
 ## Layout
 
@@ -22,7 +23,7 @@ That means:
   environment.json  # Cursor Cloud install + start (no Dockerfile)
 cursor/             # Cursor cloud-agent style image
   Dockerfile        # Cursor-like Ubuntu 24.04 base + RUN install.sh (GHCR / local just)
-  install.sh        # Docker, zsh, ubuntu user, mise, direnv (+ /workspace trust)
+  install.sh        # Docker, zsh, ubuntu user, mise (+ global uv, gh if missing), direnv, gh-ai-pr (+ /workspace trust)
   start.sh          # Start dockerd + open docker.sock for the session
 Justfile            # local build recipes
 ```
@@ -41,7 +42,7 @@ Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 Copy [`.cursor/environment.json`](.cursor/environment.json) into other repos. It has **only** `install` and `start` (no `build.dockerfile`) and `curl | bash`s the scripts from `master`.
 
-[`cursor/Dockerfile`](cursor/Dockerfile) is the Cursor-like base image (Ubuntu 24.04 plus `git`, `sudo`, `locales`, `xz-utils`, `tmux`, `python3`, `jq`, `ripgrep`, `unzip`). [`cursor/install.sh`](cursor/install.sh) is the overlay: it re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`), installs **Docker**, **zsh**, **mise**, and **direnv**, and trusts `/workspace`. After that, if the app directory (`$PWD`) has a justfile, `mise which just` succeeds, and a `setup` recipe exists, it runs `mise exec -- just setup` as `ubuntu`. It does not install `just`; without it, the recipe is skipped.
+[`cursor/Dockerfile`](cursor/Dockerfile) is the Cursor-like base image (Ubuntu 24.04 plus `git`, `sudo`, `locales`, `xz-utils`, `tmux`, `python3`, `jq`, `ripgrep`, `unzip`). [`cursor/install.sh`](cursor/install.sh) is the overlay: it re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It installs **Docker**, **zsh**, **mise**, and **direnv** when missing, installs **uv** as a global mise tool (`~/.config/mise/config.toml`), adds **gh** to that config only when `gh` is not already on `PATH`, installs the [`iloveitaly/gh-ai-pr`](https://github.com/iloveitaly/gh-ai-pr) extension as `ubuntu`, and trusts `/workspace`. After that, if the app directory (`$PWD`) has a justfile, `mise which just` succeeds, and a `setup` recipe exists, it runs `mise exec -- just setup` as `ubuntu`. It does not install `just`; without it, the recipe is skipped.
 
 [`cursor/start.sh`](cursor/start.sh) runs `sudo service docker start`, waits for `/var/run/docker.sock`, and `chmod`s it for the current session. `usermod -aG docker ubuntu` from install does not apply until a new login. Builds keep disk state only, so the daemon must start in `start`.
 
