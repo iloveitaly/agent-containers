@@ -154,15 +154,20 @@ eval "$(mise activate zsh)"
 EOF
 fi
 # Cursor cloud agents mount the repo at /workspace — trust configs there without prompts.
+# Cloud images often already have `gh`; only add it to mise when missing.
 mkdir -p "$HOME/.config/mise"
-cat > "$HOME/.config/mise/config.toml" <<'EOF'
+{
+  cat <<'EOF'
 [settings]
 trusted_config_paths = ["/workspace"]
 
 [tools]
-gh = "latest"
 uv = "latest"
 EOF
+  if ! command -v gh >/dev/null 2>&1; then
+    echo 'gh = "latest"'
+  fi
+} > "$HOME/.config/mise/config.toml"
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 
 ########################################################
@@ -193,7 +198,7 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 ########################################################
 # GLOBAL MISE TOOLS
 ########################################################
-# gh + uv from ~/.config/mise/config.toml (`mise use -g`).
+# Tools from ~/.config/mise/config.toml (`mise use -g`).
 # gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
 
 sudo -u ubuntu -H mise install
@@ -203,11 +208,15 @@ sudo -u ubuntu -H mise install
 ########################################################
 # Extensions install into $HOME/.local/share/gh/extensions. The agent
 # session runs as ubuntu, so install as that user (not root).
-# Use `mise exec` so gh is on PATH without an interactive shell.
+# Prefer an already-installed gh; otherwise `mise exec` puts mise gh on PATH.
 # Do not use `gh extension list` here: unauthenticated gh (Docker image
 # builds, fresh hosts) exits with "please run: gh auth login".
 
 gh_ai_pr_dir="$(getent passwd ubuntu | cut -d: -f6)/.local/share/gh/extensions/gh-ai-pr"
 if [ ! -d "$gh_ai_pr_dir" ]; then
-  sudo -u ubuntu -H mise exec -- gh extension install iloveitaly/gh-ai-pr
+  if command -v gh >/dev/null 2>&1; then
+    sudo -u ubuntu -H gh extension install iloveitaly/gh-ai-pr
+  else
+    sudo -u ubuntu -H mise exec -- gh extension install iloveitaly/gh-ai-pr
+  fi
 fi
