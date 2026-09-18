@@ -4,9 +4,61 @@ set shell := ["zsh", "-cu", "-o", "pipefail"]
 build-cursor:
 	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
-# Smoke-test the image: clone railpack, mise install, and build
+# Re-run install.sh in the image against mounted fixtures (no justfile / no
+# setup recipe / setup without just via mise / setup with just already via mise).
+# Image build itself has no project justfile. install.sh does not install just.
 [script]
-test: build-cursor
+test-just-setup: build-cursor
+	tmp=$(mktemp -d)
+	trap 'rm -rf "$tmp"' EXIT
+	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup" "$tmp/setup-with-just"
+	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
+	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
+	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup-with-just/Justfile"
+	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-just/mise.toml"
+	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
+	  set -euo pipefail
+	  command -v tmux
+	  command -v xz
+	  command -v python3
+	  command -v jq
+	  command -v rg
+	  command -v unzip
+	  locale -a | grep -qiE "en_US\\.(utf8|UTF-8)"
+	'
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/none:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
+	[ ! -e "$tmp/none/marker" ]
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/nosetup:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
+	[ ! -e "$tmp/nosetup/marker" ]
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/setup:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
+	[ ! -e "$tmp/setup/marker" ]
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/setup-with-just:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash -c '
+	    set -euo pipefail
+	    chown -R ubuntu:ubuntu /workspace
+	    sudo -n -u ubuntu -H mise install
+	    bash /tmp/install.sh
+	  '
+	grep -qx ran-setup "$tmp/setup-with-just/marker"
+
+# Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
+[script]
+test: test-just-setup
 	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  export HOME=/home/ubuntu
