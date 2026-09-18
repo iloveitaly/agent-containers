@@ -13,6 +13,16 @@ test-just-setup: build-cursor
 	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup"
 	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
+	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
+	  set -euo pipefail
+	  command -v tmux
+	  command -v xz
+	  command -v python3
+	  command -v jq
+	  command -v rg
+	  command -v unzip
+	  locale -a | grep -qiE "en_US\\.(utf8|UTF-8)"
+	'
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/none:/workspace" \

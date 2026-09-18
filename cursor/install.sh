@@ -72,6 +72,34 @@ if ! command -v direnv >/dev/null 2>&1; then
   packages+=(direnv)
 fi
 
+# Hosted Cloud Agents boot an unpublished Ubuntu image that already has most
+# of these. GHCR / `FROM ubuntu:24.04` builds do not. Skip when present so
+# `curl | bash` on Cursor Cloud is a no-op for each binary.
+# locales + xz-utils: Cursor staff, desktop/computer-use on custom images.
+# tmux: Cloud Agent PTYs / shared terminals.
+# python3, jq, ripgrep, unzip: observed on the default VM / agent workflows.
+if ! dpkg-query -W -f='${Status}' locales 2>/dev/null | grep -q 'install ok installed'; then
+  packages+=(locales)
+fi
+if ! command -v xz >/dev/null 2>&1; then
+  packages+=(xz-utils)
+fi
+if ! command -v tmux >/dev/null 2>&1; then
+  packages+=(tmux)
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  packages+=(python3)
+fi
+if ! command -v jq >/dev/null 2>&1; then
+  packages+=(jq)
+fi
+if ! command -v rg >/dev/null 2>&1; then
+  packages+=(ripgrep)
+fi
+if ! command -v unzip >/dev/null 2>&1; then
+  packages+=(unzip)
+fi
+
 if ((${#packages[@]})); then
   apt-get update
   # Acquire::Retries covers dropped connections, not HTTP 400 from
@@ -86,6 +114,17 @@ if ((${#packages[@]})); then
     sleep 2
   done
   rm -rf /var/lib/apt/lists/*
+fi
+
+# en_US.UTF-8: Ubuntu Docker images are often C.UTF-8 only; Cursor's
+# automatic installer now generates this locale for desktop/VNC.
+if command -v locale-gen >/dev/null 2>&1; then
+  if ! locale -a 2>/dev/null | grep -qiE 'en_US\.(utf8|UTF-8)'; then
+    locale-gen en_US.UTF-8
+  fi
+  if [ ! -f /etc/default/locale ] || ! grep -q '^LANG=' /etc/default/locale; then
+    update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+  fi
 fi
 
 ########################################################

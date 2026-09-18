@@ -13,6 +13,7 @@ That means:
 - **mise** — language/tool version management with shell activation by default; `/workspace` pre-trusted
 - **direnv** — per-directory env loading, hooked *after* mise so PATH stays consistent; `/workspace` whitelisted
 - **just setup** — if the repo has a `justfile`/`Justfile` with a `setup` recipe, `install.sh` runs `just setup` as `ubuntu`
+- **Cursor VM extras** — `locales` (`en_US.UTF-8`), `xz-utils`, `tmux`, `python3`, `jq`, `ripgrep`, and `unzip` when missing (default Cloud Agent image already has most of these)
 
 ## Layout
 
@@ -21,7 +22,7 @@ That means:
   environment.json  # Cursor Cloud install + start (no Dockerfile)
 cursor/             # Cursor cloud-agent style image
   Dockerfile        # Ubuntu 24.04 LTS; RUN install.sh as root (GHCR / local just)
-  install.sh        # Docker, zsh, ubuntu user, mise, direnv (+ /workspace trust)
+  install.sh        # Docker, zsh, ubuntu user, mise, direnv, Cursor VM extras (+ /workspace trust)
   start.sh          # Start dockerd + open docker.sock for the session
 Justfile            # local build recipes
 ```
