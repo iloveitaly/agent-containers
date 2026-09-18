@@ -185,35 +185,24 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 ########################################################
 # OPTIONAL PROJECT `just setup`
 ########################################################
-# Cursor Cloud `install` runs from the repo root (often /workspace). Docker
-# image builds have no project justfile here, so this is a no-op there.
+# `install` runs from the app root (Cursor Cloud and curl|bash). Docker image
+# builds have no project justfile in $PWD, so this is a no-op there.
 # Do not install just ourselves: projects that need it put it in mise.
 
-# Prefer /workspace (Cursor Cloud) then $PWD. just also searches parents, but
-# we only treat a justfile at the project root as project setup.
-justfile_dir=""
-for candidate in /workspace "$PWD"; do
-  if [ -f "$candidate/justfile" ] || [ -f "$candidate/Justfile" ] || [ -f "$candidate/.justfile" ]; then
-    justfile_dir="$candidate"
-    break
-  fi
-done
-
-if [ -n "$justfile_dir" ]; then
-  sudo -n -u ubuntu -H env JUSTFILE_DIR="$justfile_dir" bash -c '
+if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
+  sudo -n -u ubuntu -H bash -c '
     set -euo pipefail
-    cd "$JUSTFILE_DIR"
     eval "$(mise activate bash)"
     if ! command -v just >/dev/null 2>&1; then
-      echo "justfile found in $JUSTFILE_DIR but just is not on PATH; skipping just setup"
+      echo "justfile found in $PWD but just is not on PATH; skipping just setup"
       exit 0
     fi
     just --list >/dev/null
     if just --show setup >/dev/null 2>&1; then
-      echo "Running just setup in $JUSTFILE_DIR"
+      echo "Running just setup in $PWD"
       just setup
     else
-      echo "justfile found in $JUSTFILE_DIR but no setup recipe; skipping"
+      echo "justfile found in $PWD but no setup recipe; skipping"
     fi
   '
 fi
