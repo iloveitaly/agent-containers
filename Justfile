@@ -5,7 +5,7 @@ build-cursor:
 	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
-# setup recipe / setup without just on PATH / setup with just already on PATH).
+# setup recipe / setup without just via mise / setup with just already via mise).
 # Image build itself has no project justfile. install.sh does not install just.
 [script]
 test-just-setup: build-cursor
@@ -15,6 +15,7 @@ test-just-setup: build-cursor
 	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup-with-just/Justfile"
+	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-just/mise.toml"
 	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  command -v tmux
@@ -47,10 +48,10 @@ test-just-setup: build-cursor
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/setup-with-just:/workspace" \
 	  -w /workspace \
-	  ubuntu-docker-mise-direnv:local bash -lc '
+	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
-	    curl --proto "=https" --tlsv1.2 --retry 3 --retry-delay 5 -fsSL https://just.systems/install.sh \
-	      | bash -s -- --to /usr/local/bin
+	    chown -R ubuntu:ubuntu /workspace
+	    sudo -n -u ubuntu -H mise install
 	    bash /tmp/install.sh
 	  '
 	grep -qx ran-setup "$tmp/setup-with-just/marker"

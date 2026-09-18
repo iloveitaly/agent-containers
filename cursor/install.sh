@@ -190,19 +190,14 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
 # Do not install just ourselves: projects that need it put it in mise.
 
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-  sudo -n -u ubuntu -H bash -c '
-    set -euo pipefail
-    eval "$(mise activate bash)"
-    if ! command -v just >/dev/null 2>&1; then
-      echo "justfile found in $PWD but just is not on PATH; skipping just setup"
-      exit 0
-    fi
-    just --list >/dev/null
-    if just --show setup >/dev/null 2>&1; then
+  if sudo -n -u ubuntu -H mise which just >/dev/null 2>&1; then
+    if sudo -n -u ubuntu -H mise exec -- just --show setup >/dev/null 2>&1; then
       echo "Running just setup in $PWD"
-      just setup
+      sudo -n -u ubuntu -H mise exec -- just setup
     else
       echo "justfile found in $PWD but no setup recipe; skipping"
     fi
-  '
+  else
+    echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
+  fi
 fi
