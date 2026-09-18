@@ -4,9 +4,37 @@ set shell := ["zsh", "-cu", "-o", "pipefail"]
 build-cursor:
 	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
-# Smoke-test the image: clone railpack, mise install, and build
+# Re-run install.sh in the image against mounted fixtures (no justfile / no
+# setup recipe / setup recipe). Image build itself has no project justfile.
 [script]
-test: build-cursor
+test-just-setup: build-cursor
+	tmp=$(mktemp -d)
+	trap 'rm -rf "$tmp"' EXIT
+	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup"
+	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
+	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/none:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
+	[ ! -e "$tmp/none/marker" ]
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/nosetup:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
+	[ ! -e "$tmp/nosetup/marker" ]
+	docker run --rm \
+	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$tmp/setup:/workspace" \
+	  -w /workspace \
+	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
+	grep -qx ran-setup "$tmp/setup/marker"
+
+# Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
+[script]
+test: test-just-setup
 	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  export HOME=/home/ubuntu

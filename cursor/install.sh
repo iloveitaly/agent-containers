@@ -181,3 +181,44 @@ cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 prefix = ["/workspace"]
 EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
+
+########################################################
+# OPTIONAL PROJECT `just setup`
+########################################################
+# Cursor Cloud `install` runs from the repo root (often /workspace). Docker
+# image builds have no project justfile here, so this is a no-op there.
+
+install_just() {
+  if command -v just >/dev/null 2>&1; then
+    return 0
+  fi
+  curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 5 -fsSL https://just.systems/install.sh \
+    | bash -s -- --to /usr/local/bin
+}
+
+# Prefer /workspace (Cursor Cloud) then $PWD. just also searches parents, but
+# we only treat a justfile at the project root as project setup.
+justfile_dir=""
+for candidate in /workspace "$PWD"; do
+  if [ -f "$candidate/justfile" ] || [ -f "$candidate/Justfile" ] || [ -f "$candidate/.justfile" ]; then
+    justfile_dir="$candidate"
+    break
+  fi
+done
+
+if [ -n "$justfile_dir" ]; then
+  install_just
+  # ubuntu: mise is on PATH via the user's shell rc; recipes often need it.
+  sudo -n -u ubuntu -H env JUSTFILE_DIR="$justfile_dir" bash -lc '
+    set -euo pipefail
+    cd "$JUSTFILE_DIR"
+    eval "$(mise activate bash)"
+    just --list >/dev/null
+    if just --show setup >/dev/null 2>&1; then
+      echo "Running just setup in $JUSTFILE_DIR"
+      just setup
+    else
+      echo "justfile found in $JUSTFILE_DIR but no setup recipe; skipping"
+    fi
+  '
+fi

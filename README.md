@@ -12,6 +12,7 @@ That means:
 - **zsh** — default shell for the `ubuntu` user (Justfiles and agent sessions expect it)
 - **mise** — language/tool version management with shell activation by default; `/workspace` pre-trusted
 - **direnv** — per-directory env loading, hooked *after* mise so PATH stays consistent; `/workspace` whitelisted
+- **just setup** — if the repo has a `justfile`/`Justfile` with a `setup` recipe, `install.sh` runs `just setup` as `ubuntu`
 
 ## Layout
 
@@ -39,7 +40,7 @@ Requires `curl`, `gnupg`, `ca-certificates`, and `sudo` when not already root.
 
 Copy [`.cursor/environment.json`](.cursor/environment.json) into other repos. It has **only** `install` and `start` (no `build.dockerfile`) and `curl | bash`s the scripts from `master`.
 
-[`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, and **direnv**, and trusts `/workspace`.
+[`cursor/install.sh`](cursor/install.sh) re-execs with passwordless `sudo` so it can write Docker's apt key under `/etc/apt/keyrings` (otherwise `gpg --dearmor` fails with `Permission denied`). It also installs **zsh**, **mise**, and **direnv**, and trusts `/workspace`. After that, if a justfile is present at `/workspace` or `$PWD`, it installs [`just`](https://just.systems/) when needed and runs `just setup` when that recipe exists (skipped when the justfile has no `setup`, including this repo).
 
 [`cursor/start.sh`](cursor/start.sh) runs `sudo service docker start`, waits for `/var/run/docker.sock`, and `chmod`s it for the current session. `usermod -aG docker ubuntu` from install does not apply until a new login. Builds keep disk state only, so the daemon must start in `start`.
 
@@ -63,7 +64,10 @@ Produces `ubuntu-docker-mise-direnv:local`.
 ## Test
 
 ```bash
+just test-just-setup
 just test
 ```
 
-Builds the image (if needed), then clones [railpack](https://github.com/iloveitaly/railpack) inside the container and runs `mise install` + `mise run build`.
+`test-just-setup` rebuilds the image and re-runs `install.sh` against fixtures: no justfile, a justfile without `setup`, and a justfile whose `setup` recipe writes a marker.
+
+`just test` includes that hook, then clones [railpack](https://github.com/iloveitaly/railpack) inside the container and runs `mise install` + `mise run build`.
