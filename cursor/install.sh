@@ -111,14 +111,6 @@ fi
 # CONFIG UBUNTU USER
 ########################################################
 
-# ensure no password authentication
-mkdir -p /etc/ssh/sshd_config.d
-cat > /etc/ssh/sshd_config.d/disable_password_auth.conf <<'EOF'
-PasswordAuthentication no
-ChallengeResponseAuthentication no
-UsePAM no
-EOF
-
 # Create non-root user (only if it doesn't exist); default shell is zsh.
 id -u ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu
 chsh -s /bin/zsh ubuntu
