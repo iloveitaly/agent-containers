@@ -141,6 +141,30 @@ touch "$HOME/.bashrc" "$HOME/.zshrc"
 #   wait'0a' — PATH/tooling needed ASAP (mise)
 # Shell hook must run before direnv.
 
+# MISE_ENV selects mise.<env>.toml (including .config/mise.<env>.toml).
+# dev,extras is tied to the assumed config of
+# https://github.com/iloveitaly/python-starter-template/
+# (.config/mise.dev.toml and .config/mise.extras.toml).
+# Exported for ubuntu shells, and written to ~/.config/mise/miserc.toml so
+# non-interactive mise (agent commands, `sudo -u ubuntu`) loads the same
+# files. MISE_ENV cannot live in mise config.toml; that file is read too late.
+export MISE_ENV=dev,extras
+mise_env_snippet=$(cat <<'EOF'
+# MISE_ENV=dev,extras is tied to the assumed config of
+# https://github.com/iloveitaly/python-starter-template/
+# (.config/mise.dev.toml and .config/mise.extras.toml).
+export MISE_ENV=dev,extras
+EOF
+)
+for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"; do
+  touch "$rc"
+  if ! grep -qxF 'export MISE_ENV=dev,extras' "$rc"; then
+    tmp="$(mktemp)"
+    printf '%s\n' "$mise_env_snippet" | cat - "$rc" > "$tmp"
+    mv "$tmp" "$rc"
+  fi
+done
+
 # Install mise only if the mise CLI is not already present
 if ! command -v mise >/dev/null 2>&1; then
   curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
@@ -168,7 +192,15 @@ EOF
     echo 'gh = "latest"'
   fi
 } > "$HOME/.config/mise/config.toml"
-chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
+# Same dev,extras selection as the shell export above. miserc is read before
+# project config, which is what makes MISE_ENV apply to every mise invocation.
+cat > "$HOME/.config/mise/miserc.toml" <<'EOF'
+# Tied to the assumed config of
+# https://github.com/iloveitaly/python-starter-template/
+# (.config/mise.dev.toml and .config/mise.extras.toml).
+env = ["dev", "extras"]
+EOF
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
 
 ########################################################
 # DIRENV HOOKS
@@ -193,7 +225,7 @@ cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 [whitelist]
 prefix = ["/workspace"]
 EOF
-chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config"
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
 
 ########################################################
 # GLOBAL MISE TOOLS
