@@ -219,6 +219,15 @@ prefix = ["/workspace"]
 EOF
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
 
+# Trust the project .envrc now that direnv is installed. The `/workspace`
+# whitelist covers Cursor Cloud; `direnv allow` also trusts an install root
+# outside that prefix. Allow does not execute the file — `just setup` below
+# loads it into the ubuntu shell that runs the recipe.
+if [ -f .envrc ]; then
+  echo "Trusting .envrc in $PWD"
+  sudo -n -u ubuntu -H bash -c 'cd "$1" && direnv allow .' bash "$PWD"
+fi
+
 ########################################################
 # GLOBAL MISE TOOLS
 ########################################################
@@ -251,12 +260,27 @@ fi
 # `install` runs from the app root (Cursor Cloud and curl|bash). Docker image
 # builds have no project justfile in $PWD, so this is a no-op there.
 # Do not install just ourselves: projects that need it put it in mise.
+#
+# Run as ubuntu with mise activated, then direnv loaded, then `just setup`.
+# `mise exec -- just setup` would skip `.envrc`. Capture `direnv export`
+# before eval: a failing export still prints a dump, and
+# `eval "$(direnv export bash)"` would ignore that non-zero status.
 
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
   if sudo -n -u ubuntu -H mise which just >/dev/null 2>&1; then
     if sudo -n -u ubuntu -H mise exec -- just --show setup >/dev/null 2>&1; then
       echo "Running just setup in $PWD"
-      sudo -n -u ubuntu -H mise exec -- just setup
+      sudo -n -u ubuntu -H bash -c '
+        set -euo pipefail
+        cd "$1" || exit 1
+        mise_activate="$(mise activate bash)"
+        eval "$mise_activate"
+        if [ -f .envrc ]; then
+          direnv_exports="$(direnv export bash)"
+          eval "$direnv_exports"
+        fi
+        just setup
+      ' bash "$PWD"
     else
       echo "justfile found in $PWD but no setup recipe; skipping"
     fi

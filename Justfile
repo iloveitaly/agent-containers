@@ -5,17 +5,23 @@ build-cursor:
 	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
-# setup recipe / setup without just via mise / setup with just already via mise).
+# setup recipe / setup without just via mise / setup with just already via mise /
+# setup outside the /workspace direnv whitelist, with an .envrc).
 # Image build itself has no project justfile. install.sh does not install just.
 [script]
 test-just-setup: build-cursor
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT
-	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup" "$tmp/setup-with-just"
+	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup" "$tmp/setup-with-just" "$tmp/setup-with-envrc"
 	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup-with-just/Justfile"
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-just/mise.toml"
+	# /opt/app is outside the /workspace direnv whitelist, so this .envrc stays
+	# blocked unless install.sh runs `direnv allow` before `direnv export`.
+	printf 'setup:\n\tprintf "%%s\\n" "$FROM_DIRENV" > marker\n' > "$tmp/setup-with-envrc/Justfile"
+	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-envrc/mise.toml"
+	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/setup-with-envrc/.envrc"
 	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  command -v tmux
@@ -47,14 +53,19 @@ test-just-setup: build-cursor
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/setup-with-just:/workspace" \
+	  -v "$tmp/setup-with-envrc:/opt/app" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
-	    chown -R ubuntu:ubuntu /workspace
+	    chown -R ubuntu:ubuntu /workspace /opt/app
+	    sudo -n -u ubuntu -H mise install
+	    bash /tmp/install.sh
+	    cd /opt/app
 	    sudo -n -u ubuntu -H mise install
 	    bash /tmp/install.sh
 	  '
 	grep -qx ran-setup "$tmp/setup-with-just/marker"
+	grep -qx from-direnv "$tmp/setup-with-envrc/marker"
 
 # Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
 [script]
