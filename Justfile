@@ -12,16 +12,36 @@ build-cursor:
 test-just-setup: build-cursor
 	tmp=$(mktemp -d)
 	trap 'rm -rf "$tmp"' EXIT
-	mkdir -p "$tmp/none" "$tmp/nosetup" "$tmp/setup" "$tmp/setup-with-just" "$tmp/setup-with-envrc"
+
+	# One directory per install.sh outcome. Each is mounted as a project root.
+	mkdir -p \
+		"$tmp/none" \
+		"$tmp/nosetup" \
+		"$tmp/setup" \
+		"$tmp/setup-with-just" \
+		"$tmp/setup-with-envrc"
+
+	# No justfile. install.sh should not create a marker.
+	# (directory stays empty)
+
+	# Justfile, but no `setup` recipe. install.sh should skip it.
 	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
+
+	# `setup` recipe, and just is not a mise tool. install.sh should skip it.
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
+
+	# `setup` recipe, and just is already declared in mise. install.sh should run it.
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup-with-just/Justfile"
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-just/mise.toml"
-	# /opt/app is outside the /workspace direnv whitelist, so this .envrc stays
-	# blocked unless install.sh runs `direnv allow` before `direnv export`.
+
+	# Same as above, plus an .envrc. This directory is mounted at /opt/app,
+	# outside the /workspace direnv whitelist, so the recipe only sees
+	# FROM_DIRENV when install.sh allows and exports that file.
 	printf 'setup:\n\tprintf "%%s\\n" "$FROM_DIRENV" > marker\n' > "$tmp/setup-with-envrc/Justfile"
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-envrc/mise.toml"
 	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/setup-with-envrc/.envrc"
+
+	# Base image has the Cursor-like CLIs and locale.
 	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
 	  set -euo pipefail
 	  command -v tmux
@@ -32,24 +52,32 @@ test-just-setup: build-cursor
 	  command -v unzip
 	  locale -a | grep -qiE "en_US\\.(utf8|UTF-8)"
 	'
+
+	# No justfile: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/none:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
 	[ ! -e "$tmp/none/marker" ]
+
+	# Justfile without a setup recipe: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/nosetup:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
 	[ ! -e "$tmp/nosetup/marker" ]
+
+	# Setup recipe, but just is not installed via mise: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/setup:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
 	[ ! -e "$tmp/setup/marker" ]
+
+	# Setup recipe with just installed, and an .envrc outside /workspace.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/setup-with-just:/workspace" \
@@ -64,7 +92,9 @@ test-just-setup: build-cursor
 	    sudo -n -u ubuntu -H mise install
 	    bash /tmp/install.sh
 	  '
+	# /workspace ran `just setup` and wrote its marker.
 	grep -qx ran-setup "$tmp/setup-with-just/marker"
+	# /opt/app saw the value exported by .envrc.
 	grep -qx from-direnv "$tmp/setup-with-envrc/marker"
 
 # Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
