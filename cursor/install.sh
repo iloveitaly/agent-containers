@@ -129,12 +129,14 @@ as_ubuntu() {
   sudo -n -u ubuntu -H "$@"
 }
 
-# Run a command as ubuntu, in the directory this script was started from.
-as_ubuntu_here() {
+# Run a command as ubuntu after cd'ing to the project root.
+# That is the directory install.sh was started in ($PWD): Cursor's /workspace,
+# or wherever `curl | bash` was run. sudo does not promise to keep that cwd.
+as_ubuntu_in_project() {
   as_ubuntu bash -c 'cd "$1" && shift && exec "$@"' bash "$PWD" "$@"
 }
 
-# Run a command as ubuntu in that same directory, with mise applied and then
+# Run a command as ubuntu in the project root, with mise applied and then
 # .envrc. `direnv exec` applies .envrc to the command. The shell hook is
 # `eval "$(direnv export bash)"` because a child process cannot change the
 # parent shell's environment; there is no other way to load that diff here.
@@ -255,7 +257,8 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.co
 # does, via `direnv exec`, when it runs `just setup`.
 if [ -f .envrc ]; then
   echo "Trusting .envrc in $PWD"
-  as_ubuntu_here direnv allow .
+  # Record trust only. .envrc runs later, inside with_mise_and_direnv.
+  as_ubuntu_in_project direnv allow .
 fi
 
 ########################################################
@@ -264,7 +267,8 @@ fi
 # Tools from ~/.config/mise/config.toml (`mise use -g`).
 # gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
 
-as_ubuntu_here mise install
+# Install global mise tools, plus project tools when a project mise config is present.
+as_ubuntu_in_project mise install
 
 ########################################################
 # GH AI-PR EXTENSION
@@ -295,9 +299,12 @@ fi
 # exists, then runs the recipe. `mise exec -- just setup` would skip .envrc.
 
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-  if as_ubuntu_here mise which just >/dev/null 2>&1; then
-    if as_ubuntu_here mise exec -- just --show setup >/dev/null 2>&1; then
+  # just is a project tool. Skip setup when this project does not install it.
+  if as_ubuntu_in_project mise which just >/dev/null 2>&1; then
+    # Confirm the justfile defines a setup recipe before running it.
+    if as_ubuntu_in_project mise exec -- just --show setup >/dev/null 2>&1; then
       echo "Running just setup in $PWD"
+      # mise hook-env, then .envrc, then the recipe.
       with_mise_and_direnv just setup
     else
       echo "justfile found in $PWD but no setup recipe; skipping"
