@@ -36,7 +36,7 @@ test-just-setup: build-cursor
 
 	# Same as above, plus an .envrc. This directory is mounted at /opt/app,
 	# outside the /workspace direnv whitelist, so the recipe only sees
-	# FROM_DIRENV when install.sh allows and exports that file.
+	# FROM_DIRENV when install.sh allows that file and runs the recipe under `direnv exec`.
 	printf 'setup:\n\tprintf "%%s\\n" "$FROM_DIRENV" > marker\n' > "$tmp/setup-with-envrc/Justfile"
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-envrc/mise.toml"
 	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/setup-with-envrc/.envrc"

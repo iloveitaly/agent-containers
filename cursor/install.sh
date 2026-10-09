@@ -122,6 +122,36 @@ echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu
 # Set a password for ubuntu user
 echo "ubuntu:ubuntu" | chpasswd
 
+# This script stays root so it can apt-install and write /etc. Mise, direnv's
+# allow database, and gh extensions belong to ubuntu.
+# -H sets HOME to that user. -n fails instead of prompting if sudo needs a password.
+as_ubuntu() {
+  sudo -n -u ubuntu -H "$@"
+}
+
+# Run a command as ubuntu, in the directory this script was started from.
+as_ubuntu_here() {
+  as_ubuntu bash -c 'cd "$1" && shift && exec "$@"' bash "$PWD" "$@"
+}
+
+# Run a command as ubuntu in that same directory, with mise applied and then
+# .envrc. `direnv exec` applies .envrc to the command. The shell hook is
+# `eval "$(direnv export bash)"` because a child process cannot change the
+# parent shell's environment; there is no other way to load that diff here.
+with_mise_and_direnv() {
+  as_ubuntu bash -c '
+    set -euo pipefail
+    cd "$1" || exit 1
+    shift
+    mise_activate="$(mise activate bash)"
+    eval "$mise_activate"
+    if [ -f .envrc ]; then
+      exec direnv exec . "$@"
+    fi
+    exec "$@"
+  ' bash "$PWD" "$@"
+}
+
 # Script runs as root during image build; point HOME at the ubuntu user.
 export HOME="$(getent passwd ubuntu | cut -d: -f6)"
 touch "$HOME/.bashrc" "$HOME/.zshrc"
@@ -138,7 +168,7 @@ touch "$HOME/.bashrc" "$HOME/.zshrc"
 # https://github.com/iloveitaly/python-starter-template/
 # (.config/mise.dev.toml and .config/mise.extras.toml).
 # Exported for ubuntu shells, and written to ~/.config/mise/miserc.toml so
-# non-interactive mise (agent commands, `sudo -u ubuntu`) loads the same
+# non-interactive mise (agent commands, `as_ubuntu`) loads the same
 # files. MISE_ENV cannot live in mise config.toml; that file is read too late.
 export MISE_ENV=dev,extras
 mise_env_snippet=$(cat <<'EOF'
@@ -221,11 +251,11 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.co
 
 # Trust the project .envrc now that direnv is installed. The `/workspace`
 # whitelist covers Cursor Cloud; `direnv allow` also trusts an install root
-# outside that prefix. Allow does not execute the file — `just setup` below
-# loads it into the ubuntu shell that runs the recipe.
+# outside that prefix. Allow does not execute the file. `with_mise_and_direnv`
+# does, via `direnv exec`, when it runs `just setup`.
 if [ -f .envrc ]; then
   echo "Trusting .envrc in $PWD"
-  sudo -n -u ubuntu -H bash -c 'cd "$1" && direnv allow .' bash "$PWD"
+  as_ubuntu_here direnv allow .
 fi
 
 ########################################################
@@ -234,7 +264,7 @@ fi
 # Tools from ~/.config/mise/config.toml (`mise use -g`).
 # gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
 
-sudo -u ubuntu -H mise install
+as_ubuntu_here mise install
 
 ########################################################
 # GH AI-PR EXTENSION
@@ -248,9 +278,9 @@ sudo -u ubuntu -H mise install
 gh_ai_pr_dir="$(getent passwd ubuntu | cut -d: -f6)/.local/share/gh/extensions/gh-ai-pr"
 if [ ! -d "$gh_ai_pr_dir" ]; then
   if command -v gh >/dev/null 2>&1; then
-    sudo -u ubuntu -H gh extension install iloveitaly/gh-ai-pr
+    as_ubuntu gh extension install iloveitaly/gh-ai-pr
   else
-    sudo -u ubuntu -H mise exec -- gh extension install iloveitaly/gh-ai-pr
+    as_ubuntu mise exec -- gh extension install iloveitaly/gh-ai-pr
   fi
 fi
 
@@ -261,26 +291,14 @@ fi
 # builds have no project justfile in $PWD, so this is a no-op there.
 # Do not install just ourselves: projects that need it put it in mise.
 #
-# Run as ubuntu with mise activated, then direnv loaded, then `just setup`.
-# `mise exec -- just setup` would skip `.envrc`. Capture `direnv export`
-# before eval: a failing export still prints a dump, and
-# `eval "$(direnv export bash)"` would ignore that non-zero status.
+# `with_mise_and_direnv` activates mise, then `direnv exec` when .envrc
+# exists, then runs the recipe. `mise exec -- just setup` would skip .envrc.
 
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-  if sudo -n -u ubuntu -H mise which just >/dev/null 2>&1; then
-    if sudo -n -u ubuntu -H mise exec -- just --show setup >/dev/null 2>&1; then
+  if as_ubuntu_here mise which just >/dev/null 2>&1; then
+    if as_ubuntu_here mise exec -- just --show setup >/dev/null 2>&1; then
       echo "Running just setup in $PWD"
-      sudo -n -u ubuntu -H bash -c '
-        set -euo pipefail
-        cd "$1" || exit 1
-        mise_activate="$(mise activate bash)"
-        eval "$mise_activate"
-        if [ -f .envrc ]; then
-          direnv_exports="$(direnv export bash)"
-          eval "$direnv_exports"
-        fi
-        just setup
-      ' bash "$PWD"
+      with_mise_and_direnv just setup
     else
       echo "justfile found in $PWD but no setup recipe; skipping"
     fi
