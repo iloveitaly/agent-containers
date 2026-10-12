@@ -7,6 +7,7 @@ build-cursor:
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
 # setup recipe / setup without just via mise / setup with just already via mise /
 # setup outside the /workspace direnv whitelist, with an .envrc).
+# Markers record OP_INTEGRATION_DISABLED, which install.sh sets before just.
 # Image build itself has no project justfile. install.sh does not install just.
 [script]
 test-just-setup: build-cursor
@@ -30,14 +31,15 @@ test-just-setup: build-cursor
 	# `setup` recipe, and just is not a mise tool. install.sh should skip it.
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
 
-	# `setup` recipe, and just is already declared in mise. install.sh should run it.
-	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup-with-just/Justfile"
+	# `setup` recipe, and just is already declared in mise. install.sh should run it
+	# with OP_INTEGRATION_DISABLED already set.
+	printf 'setup:\n\tprintf "%%s\\n" "$OP_INTEGRATION_DISABLED" > marker\n' > "$tmp/setup-with-just/Justfile"
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-just/mise.toml"
 
 	# Same as above, plus an .envrc. This directory is mounted at /opt/app,
 	# outside the /workspace direnv whitelist, so the recipe only sees
 	# FROM_DIRENV when install.sh allows that file and runs the recipe under `direnv exec`.
-	printf 'setup:\n\tprintf "%%s\\n" "$FROM_DIRENV" > marker\n' > "$tmp/setup-with-envrc/Justfile"
+	printf 'setup:\n\tprintf "%%s %%s\\n" "$FROM_DIRENV" "$OP_INTEGRATION_DISABLED" > marker\n' > "$tmp/setup-with-envrc/Justfile"
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-envrc/mise.toml"
 	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/setup-with-envrc/.envrc"
 
@@ -51,6 +53,8 @@ test-just-setup: build-cursor
 	  command -v rg
 	  command -v unzip
 	  locale -a | grep -qiE "en_US\\.(utf8|UTF-8)"
+	  grep -qxF "export OP_INTEGRATION_DISABLED=1" /home/ubuntu/.zshenv
+	  grep -qxF "OP_INTEGRATION_DISABLED=1" /etc/environment
 	'
 
 	# No justfile: no marker.
@@ -92,10 +96,10 @@ test-just-setup: build-cursor
 	    sudo -n -u ubuntu -H mise install
 	    bash /tmp/install.sh
 	  '
-	# /workspace ran `just setup` and wrote its marker.
-	grep -qx ran-setup "$tmp/setup-with-just/marker"
-	# /opt/app saw the value exported by .envrc.
-	grep -qx from-direnv "$tmp/setup-with-envrc/marker"
+	# /workspace ran `just setup` with desktop 1Password integration disabled.
+	grep -qx 1 "$tmp/setup-with-just/marker"
+	# /opt/app saw the value exported by .envrc, and the same op flag through direnv exec.
+	grep -qx 'from-direnv 1' "$tmp/setup-with-envrc/marker"
 
 # Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
 [script]

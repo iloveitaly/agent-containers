@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Headless installs have no 1Password desktop app. `op` (from a just recipe,
+# a .envrc, or a mise hook) otherwise waits on that app. Set this before any
+# of those run. `sudo -E` below keeps it across the root re-exec; `as_ubuntu`
+# passes it again because `sudo -u` resets the environment.
+export OP_INTEGRATION_DISABLED=1
+
 # Cursor Cloud `install` runs as ubuntu (passwordless sudo). Docker image
 # builds and "fresh Ubuntu host" runs are already root. Re-exec so apt/gpg
 # can write /etc/apt/keyrings and the rest of this script can run as root.
@@ -126,7 +132,9 @@ echo "ubuntu:ubuntu" | chpasswd
 # allow database, and gh extensions belong to ubuntu.
 # -H sets HOME to that user. -n fails instead of prompting if sudo needs a password.
 as_ubuntu() {
-  sudo -n -u ubuntu -H "$@"
+  # env_reset on `sudo -u` would drop OP_INTEGRATION_DISABLED. Set it on the
+  # ubuntu command so direnv, mise, and just setup all inherit it.
+  sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 "$@"
 }
 
 # Run a command as ubuntu after cd'ing to the project root.
@@ -147,6 +155,9 @@ with_mise_and_direnv() {
     shift
     mise_activate="$(mise activate bash)"
     eval "$mise_activate"
+    # Set again after mise activate, before .envrc and the recipe. direnv
+    # keeps variables already in the environment unless .envrc unsets them.
+    export OP_INTEGRATION_DISABLED=1
     if [ -f .envrc ]; then
       exec direnv exec . "$@"
     fi
@@ -180,6 +191,12 @@ mise_env_snippet=$(cat <<'EOF'
 export MISE_ENV=dev,extras
 EOF
 )
+op_integration_snippet=$(cat <<'EOF'
+# Headless agent installs have no 1Password app. Keep desktop integration off
+# so later shells (just, direnv, mise) do not wait on it.
+export OP_INTEGRATION_DISABLED=1
+EOF
+)
 for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"; do
   touch "$rc"
   if ! grep -qxF 'export MISE_ENV=dev,extras' "$rc"; then
@@ -187,7 +204,17 @@ for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"; do
     printf '%s\n' "$mise_env_snippet" | cat - "$rc" > "$tmp"
     mv "$tmp" "$rc"
   fi
+  if ! grep -qxF 'export OP_INTEGRATION_DISABLED=1' "$rc"; then
+    tmp="$(mktemp)"
+    printf '%s\n' "$op_integration_snippet" | cat - "$rc" > "$tmp"
+    mv "$tmp" "$rc"
+  fi
 done
+# PAM login and `sudo` sessions read this. Shell rc above covers interactive
+# and zsh non-interactive shells that do not go through PAM.
+if ! grep -qxF 'OP_INTEGRATION_DISABLED=1' /etc/environment 2>/dev/null; then
+  printf '%s\n' 'OP_INTEGRATION_DISABLED=1' >> /etc/environment
+fi
 
 # Install mise only if the mise CLI is not already present
 if ! command -v mise >/dev/null 2>&1; then
