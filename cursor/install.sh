@@ -324,15 +324,24 @@ fi
 #
 # `with_mise_and_direnv` activates mise, then `direnv exec` when .envrc
 # exists, then runs the recipe. `mise exec -- just setup` would skip .envrc.
+#
+# python-starter-template's setup starts docker compose (`docker_up`) and
+# seeds the DB. Cursor Cloud `install` has the docker CLI but not a daemon
+# (`start.sh` starts dockerd). `--skip-services` omits those steps. Probe
+# `just --usage setup` so a recipe without that flag still runs as `just setup`.
 
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
   # just is a project tool. Skip setup when this project does not install it.
   if as_ubuntu_in_project mise which just >/dev/null 2>&1; then
     # Confirm the justfile defines a setup recipe before running it.
     if as_ubuntu_in_project mise exec -- just --show setup >/dev/null 2>&1; then
-      echo "Running just setup in $PWD"
+      setup_cmd=(just setup)
+      if as_ubuntu_in_project mise exec -- just --usage setup 2>/dev/null | grep -q -- '--skip-services'; then
+        setup_cmd+=( --skip-services)
+      fi
+      echo "Running ${setup_cmd[*]} in $PWD"
       # mise hook-env, then .envrc, then the recipe.
-      with_mise_and_direnv just setup
+      with_mise_and_direnv "${setup_cmd[@]}"
     else
       echo "justfile found in $PWD but no setup recipe; skipping"
     fi
