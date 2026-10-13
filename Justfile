@@ -7,10 +7,8 @@ build-cursor:
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
 # setup recipe / setup without just via mise / setup with just already via mise /
 # setup that advertises --skip-services / setup outside the /workspace direnv
-# whitelist, with an .envrc). Then re-run start.sh --skip-docker: full
-# `just setup` on container start, including a recipe that advertises
-# --skip-services (the flag must not be passed) outside the /workspace
-# direnv whitelist.
+# whitelist, with an .envrc). Then run the container-start `just setup` command
+# from start.sh (mise activate, direnv exec, plain `just setup`).
 # Markers record OP_INTEGRATION_DISABLED, which both scripts set before just.
 # Image build itself has no project justfile. install.sh does not install just.
 [script]
@@ -57,10 +55,11 @@ test-just-setup: build-cursor
 	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-envrc/mise.toml"
 	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/setup-with-envrc/.envrc"
 
-	# Container start runs full `just setup` after dockerd. This recipe advertises
-	# --skip-services; start.sh must not pass it. Mounted at /opt/start-app, outside
-	# the /workspace direnv whitelist, so the marker only sees FROM_DIRENV when
-	# start.sh allows .envrc and runs the recipe under `direnv exec`.
+	# Container start runs plain `just setup`. This recipe advertises
+	# --skip-services; the marker records the default because start.sh does not
+	# pass the flag. Mounted at /opt/start-app, outside the /workspace direnv
+	# whitelist, so the marker only sees FROM_DIRENV when start.sh allows
+	# .envrc and runs the recipe under `direnv exec`.
 	# The quoted interpolation below writes a skip_services parameter
 	# reference into the fixture justfile; it is not a variable of this recipe.
 	printf '[arg("skip_services", long="skip-services", value="true")]\nsetup skip_services="false":\n\tprintf "%%s %%s %%s\\n" "$FROM_DIRENV" "$OP_INTEGRATION_DISABLED" "{{ "{{skip_services}}" }}" > marker\n' > "$tmp/start-full-setup/Justfile"
@@ -138,17 +137,8 @@ test-just-setup: build-cursor
 	  '
 	grep -qx '1 true' "$tmp/setup-skip-services/marker"
 
-	# No justfile: start.sh --skip-docker exits without a marker.
-	docker run --rm \
-	  -v "$PWD/cursor/start.sh:/tmp/start.sh:ro" \
-	  -v "$tmp/none:/workspace" \
-	  -w /workspace \
-	  ubuntu-docker-mise-direnv:local bash /tmp/start.sh --skip-docker
-	[ ! -e "$tmp/none/marker" ]
-
-	# Container start runs `just setup` with the service steps included.
-	# --skip-docker stands in for the daemon this fixture does not need.
-	docker run --rm \
+	# Container start runs `just setup` after dockerd.
+	docker run --rm --privileged \
 	  -v "$PWD/cursor/start.sh:/tmp/start.sh:ro" \
 	  -v "$tmp/start-full-setup:/opt/start-app" \
 	  -w /opt/start-app \
@@ -156,7 +146,7 @@ test-just-setup: build-cursor
 	    set -euo pipefail
 	    chown -R ubuntu:ubuntu /opt/start-app
 	    sudo -n -u ubuntu -H mise install
-	    bash /tmp/start.sh --skip-docker
+	    bash /tmp/start.sh
 	  '
 	grep -qx 'from-direnv 1 false' "$tmp/start-full-setup/marker"
 
