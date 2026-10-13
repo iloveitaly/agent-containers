@@ -41,8 +41,8 @@ test-just-setup: build-cursor
 
 	# `setup` advertises --skip-services. just 1.46 added [arg] long/value flags.
 	# install.sh should pass the flag; the marker records that it did.
-	# `{{ "{{skip_services}}" }}` is this recipe emitting `{{skip_services}}`
-	# into the fixture justfile, not an interpolation of this recipe.
+	# The quoted interpolation below writes a skip_services parameter
+	# reference into the fixture justfile; it is not a variable of this recipe.
 	printf '[arg("skip_services", long="skip-services", value="true")]\nsetup skip_services="false":\n\tprintf "%%s %%s\\n" "$OP_INTEGRATION_DISABLED" "{{ "{{skip_services}}" }}" > marker\n' > "$tmp/setup-skip-services/Justfile"
 	printf '[tools]\njust = "1.46.0"\n' > "$tmp/setup-skip-services/mise.toml"
 
