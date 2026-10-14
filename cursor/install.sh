@@ -141,12 +141,53 @@ if ! command -v mise >/dev/null 2>&1; then
   curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
 fi
 
-# lineinfile is only needed for the rc/environment edits below — after mise.
-# Use the pypi backend (not system pip / PEP 668 --break-system-packages).
+# System mise config (lowest precedence; survives ~/.config/mise rsync).
+# Directory is root:ubuntu 775 so `mise lock -g` as ubuntu can write mise.lock.
+# Write this before lineinfile: the pypi backend needs uv from this config.
+mkdir -p /etc/mise
+chown root:ubuntu /etc/mise
+chmod 0775 /etc/mise
+{
+  cat <<'EOF'
+[settings]
+trusted_config_paths = ["/workspace"]
+
+[tools]
+uv = "latest"
+EOF
+  if ! command -v gh >/dev/null 2>&1; then
+    echo 'gh = "latest"'
+  fi
+} > /etc/mise/config.toml
+
+# miserc is read before project config; env cannot live in config.toml.
+cat > /etc/mise/miserc.toml <<'EOF'
+# Tied to the assumed config of
+# https://github.com/iloveitaly/python-starter-template/
+# (.config/mise.dev.toml and .config/mise.extras.toml).
+env = ["dev", "extras"]
+EOF
+chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
+
+# Drop user-level copies from older installs so they cannot override /etc/mise.
+rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
+
+mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise" "$HOME/.local/share/mise"
+cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
+[whitelist]
+prefix = ["/workspace"]
+EOF
+touch "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
+chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config" "$HOME/.local"
+
+# uv first (pypi backend), then lineinfile for the rc/environment edits below.
+# Not system pip — avoids PEP 668 --break-system-packages.
 LINEINFILE_SPEC=pypi:lineinfile@0.5.2
-mkdir -p "$HOME/.local/state/mise" "$HOME/.local/share/mise"
-chown -R ubuntu:ubuntu "$HOME/.local"
-sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install "$LINEINFILE_SPEC"
+sudo -n -u ubuntu -H env MISE_ENV=dev,extras bash -euo pipefail -c '
+  mise install uv
+  mise install "$1"
+' bash "$LINEINFILE_SPEC"
 
 # Idempotent line edits (Ansible-style). Optional 3rd arg is a regexp: when it
 # matches, the line is replaced; otherwise the line is inserted (BOF if $4=bof).
@@ -191,7 +232,6 @@ lineinfile /etc/environment 'MISE_ENV=dev,extras' '^MISE_ENV='
 remove_op_integration_lines /etc/environment
 
 # Bash: stock ~/.bashrc returns early when non-interactive, so put MISE_ENV at BOF.
-touch "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 lineinfile "$HOME/.bashrc" 'export MISE_ENV=dev,extras' '^export MISE_ENV=' bof
 remove_op_integration_lines "$HOME/.bashrc"
 remove_op_integration_lines "$HOME/.zshenv"
@@ -201,46 +241,6 @@ lineinfile "$HOME/.bashrc" 'eval "$(mise activate bash)"' 'mise activate bash'
 lineinfile "$HOME/.bashrc" 'eval "$(direnv hook bash)"' 'direnv hook bash'
 lineinfile "$HOME/.zshrc" 'eval "$(mise activate zsh)"' 'mise activate zsh'
 lineinfile "$HOME/.zshrc" 'eval "$(direnv hook zsh)"' 'direnv hook zsh'
-
-# System mise config (lowest precedence; survives ~/.config/mise rsync).
-# Directory is root:ubuntu 775 so `mise lock -g` as ubuntu can write mise.lock.
-mkdir -p /etc/mise
-chown root:ubuntu /etc/mise
-chmod 0775 /etc/mise
-{
-  cat <<'EOF'
-[settings]
-trusted_config_paths = ["/workspace"]
-
-[tools]
-uv = "latest"
-EOF
-  if ! command -v gh >/dev/null 2>&1; then
-    echo 'gh = "latest"'
-  fi
-} > /etc/mise/config.toml
-
-# miserc is read before project config; env cannot live in config.toml.
-cat > /etc/mise/miserc.toml <<'EOF'
-# Tied to the assumed config of
-# https://github.com/iloveitaly/python-starter-template/
-# (.config/mise.dev.toml and .config/mise.extras.toml).
-env = ["dev", "extras"]
-EOF
-chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
-
-# Drop user-level copies from older installs so they cannot override /etc/mise.
-rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
-
-# Whitelist /workspace so .envrc loads without `direnv allow` on first shell.
-mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise"
-cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
-[whitelist]
-prefix = ["/workspace"]
-EOF
-
-chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
-chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config" "$HOME/.local"
 
 ########################################################
 # UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
