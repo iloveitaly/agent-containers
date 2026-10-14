@@ -5,10 +5,10 @@ build-cursor:
 	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
 
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
-# setup recipe / setup without just via mise / setup with just already via mise /
+# setup recipe / setup without just via mise / setup with just via mise /
 # setup that advertises --skip-services / setup outside the /workspace direnv
 # whitelist, with an .envrc). Then run the container-start `just setup` command
-# from start.sh (mise activate, direnv exec, plain `just setup`).
+# from start.sh (mise exec, direnv exec, plain `just setup`).
 # Markers record OP_INTEGRATION_DISABLED, which both scripts set before just.
 # Image build itself has no project justfile. install.sh does not install just.
 [script]
@@ -35,24 +35,24 @@ test-just-setup: build-cursor
 	# `setup` recipe, and just is not a mise tool. install.sh should skip it.
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
 
-	# `setup` recipe, and just is already declared in mise. install.sh should run it
-	# with OP_INTEGRATION_DISABLED already set. This recipe has no --skip-services
-	# flag, so install.sh must not pass one.
+	# `setup` recipe, and just is declared in mise. install.sh runs `mise install`
+	# and then `just setup` with OP_INTEGRATION_DISABLED already set. This recipe
+	# has no --skip-services flag, so install.sh must not pass one.
 	printf 'setup:\n\tprintf "%%s\\n" "$OP_INTEGRATION_DISABLED" > marker\n' > "$tmp/setup-with-just/Justfile"
-	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-just/mise.toml"
+	printf '[tools]\njust = "latest"\n' > "$tmp/setup-with-just/mise.toml"
 
-	# `setup` advertises --skip-services. just 1.46 added [arg] long/value flags.
+	# `setup` advertises --skip-services.
 	# install.sh should pass the flag; the marker records that it did.
 	# The quoted interpolation below writes a skip_services parameter
 	# reference into the fixture justfile; it is not a variable of this recipe.
 	printf '[arg("skip_services", long="skip-services", value="true")]\nsetup skip_services="false":\n\tprintf "%%s %%s\\n" "$OP_INTEGRATION_DISABLED" "{{ "{{skip_services}}" }}" > marker\n' > "$tmp/setup-skip-services/Justfile"
-	printf '[tools]\njust = "1.46.0"\n' > "$tmp/setup-skip-services/mise.toml"
+	printf '[tools]\njust = "latest"\n' > "$tmp/setup-skip-services/mise.toml"
 
 	# Same as setup-with-just, plus an .envrc. This directory is mounted at /opt/app,
 	# outside the /workspace direnv whitelist, so the recipe only sees
 	# FROM_DIRENV when install.sh allows that file and runs the recipe under `direnv exec`.
 	printf 'setup:\n\tprintf "%%s %%s\\n" "$FROM_DIRENV" "$OP_INTEGRATION_DISABLED" > marker\n' > "$tmp/setup-with-envrc/Justfile"
-	printf '[tools]\njust = "1.38.0"\n' > "$tmp/setup-with-envrc/mise.toml"
+	printf '[tools]\njust = "latest"\n' > "$tmp/setup-with-envrc/mise.toml"
 	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/setup-with-envrc/.envrc"
 
 	# Container start runs plain `just setup`. This recipe advertises
@@ -63,21 +63,23 @@ test-just-setup: build-cursor
 	# The quoted interpolation below writes a skip_services parameter
 	# reference into the fixture justfile; it is not a variable of this recipe.
 	printf '[arg("skip_services", long="skip-services", value="true")]\nsetup skip_services="false":\n\tprintf "%%s %%s %%s\\n" "$FROM_DIRENV" "$OP_INTEGRATION_DISABLED" "{{ "{{skip_services}}" }}" > marker\n' > "$tmp/start-full-setup/Justfile"
-	printf '[tools]\njust = "1.46.0"\n' > "$tmp/start-full-setup/mise.toml"
+	printf '[tools]\njust = "latest"\n' > "$tmp/start-full-setup/mise.toml"
 	printf 'export FROM_DIRENV=from-direnv\n' > "$tmp/start-full-setup/.envrc"
 
-	# Base image has the Cursor-like CLIs and locale.
-	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
-	  set -euo pipefail
+	# Base image has the Cursor-like CLIs, locale, and non-interactive zsh shims.
+	docker run --rm ubuntu-docker-mise-direnv:local zsh -cu '
 	  command -v tmux
 	  command -v xz
 	  command -v python3
 	  command -v jq
 	  command -v rg
 	  command -v unzip
+	  command -v uv
+	  command -v gh
 	  locale -a | grep -qiE "en_US\\.(utf8|UTF-8)"
 	  grep -qxF "export OP_INTEGRATION_DISABLED=1" /home/ubuntu/.zshenv
 	  grep -qxF "OP_INTEGRATION_DISABLED=1" /etc/environment
+	  grep -qxF "MISE_ENV=dev,extras" /etc/environment
 	'
 
 	# No justfile: no marker.
@@ -104,7 +106,7 @@ test-just-setup: build-cursor
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
 	[ ! -e "$tmp/setup/marker" ]
 
-	# Setup recipe with just installed, and an .envrc outside /workspace.
+	# Setup recipe with just in mise.toml, and an .envrc outside /workspace.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$tmp/setup-with-just:/workspace" \
@@ -112,11 +114,9 @@ test-just-setup: build-cursor
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
-	    chown -R ubuntu:ubuntu /workspace /opt/app
-	    sudo -n -u ubuntu -H mise install
+	    sudo chown -R ubuntu:ubuntu /workspace /opt/app
 	    bash /tmp/install.sh
 	    cd /opt/app
-	    sudo -n -u ubuntu -H mise install
 	    bash /tmp/install.sh
 	  '
 	# /workspace ran `just setup` with desktop 1Password integration disabled.
@@ -131,8 +131,7 @@ test-just-setup: build-cursor
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
-	    chown -R ubuntu:ubuntu /workspace
-	    sudo -n -u ubuntu -H mise install
+	    sudo chown -R ubuntu:ubuntu /workspace
 	    bash /tmp/install.sh
 	  '
 	grep -qx '1 true' "$tmp/setup-skip-services/marker"
@@ -144,8 +143,8 @@ test-just-setup: build-cursor
 	  -w /opt/start-app \
 	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
-	    chown -R ubuntu:ubuntu /opt/start-app
-	    sudo -n -u ubuntu -H mise install
+	    sudo chown -R ubuntu:ubuntu /opt/start-app
+	    mise install
 	    bash /tmp/start.sh
 	  '
 	grep -qx 'from-direnv 1 false' "$tmp/start-full-setup/marker"
@@ -153,14 +152,11 @@ test-just-setup: build-cursor
 # Smoke-test the image: just-setup hook, then clone railpack, mise install, and build
 [script]
 test: test-just-setup
-	docker run --rm ubuntu-docker-mise-direnv:local bash -lc '
-	  set -euo pipefail
-	  export HOME=/home/ubuntu
-	  eval "$(mise activate bash)"
+	docker run --rm ubuntu-docker-mise-direnv:local zsh -cu '
 	  command -v gh
 	  command -v uv
-	  mise which gh | grep -F '.local/share/mise/installs/gh'
-	  mise which uv | grep -F '.local/share/mise/installs/uv'
+	  mise which gh | grep -F ".local/share/mise/installs/gh"
+	  mise which uv | grep -F ".local/share/mise/installs/uv"
 	  test -x /home/ubuntu/.local/share/gh/extensions/gh-ai-pr/gh-ai-pr
 	  git clone --depth 1 https://github.com/iloveitaly/railpack.git /tmp/railpack
 	  cd /tmp/railpack

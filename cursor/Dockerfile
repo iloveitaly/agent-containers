@@ -8,10 +8,9 @@ ENV LC_ALL=en_US.UTF-8
 # stand-in when we are not on Cursor's unpublished VM (GHCR / local just).
 # Do not put these in install.sh — that script is the overlay (Docker, mise,
 # direnv, zsh) and runs via curl|bash on top of Cursor's own image.
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    gnupg \
     git \
     sudo \
     locales \
@@ -27,3 +26,6 @@ RUN apt-get update && apt-get install -y \
 
 COPY install.sh /tmp/install.sh
 RUN bash /tmp/install.sh && rm /tmp/install.sh
+
+USER ubuntu
+WORKDIR /home/ubuntu
