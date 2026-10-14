@@ -25,7 +25,8 @@ sudo chmod 666 /var/run/docker.sock
 
 # install.sh runs `just setup --skip-services` while the snapshot is built.
 # Run `just setup` here on container start once dockerd is ready.
-sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 bash -euo pipefail -c '
+# Do not set OP_INTEGRATION_DISABLED here — that flag is install-process-only.
+sudo -n -u ubuntu -H env MISE_ENV=dev,extras bash -euo pipefail -c '
   cd "$1"
 
   if [ -f .envrc ]; then

@@ -25,7 +25,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY install.sh /tmp/install.sh
-RUN bash /tmp/install.sh && rm /tmp/install.sh
+COPY snippets/zshenv /tmp/snippets/zshenv
+RUN bash /tmp/install.sh && rm -rf /tmp/install.sh /tmp/snippets
 
 USER ubuntu
 WORKDIR /home/ubuntu

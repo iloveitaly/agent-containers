@@ -2,9 +2,8 @@
 set -euo pipefail
 
 # Headless installs have no 1Password desktop app. `op` (from a just recipe,
-# a .envrc, or a mise hook) otherwise waits on that app. Set this before any
-# of those run. `sudo -E` below keeps it across the root re-exec; the ubuntu
-# subshell at the end passes it again because `sudo -u` resets the environment.
+# a .envrc, or a mise hook) otherwise waits on that app. Set this only for the
+# install process — do not persist it into shell rc, /etc/environment, or start.
 export OP_INTEGRATION_DISABLED=1
 
 # Cursor Cloud `install` runs as ubuntu (passwordless sudo). Docker image
@@ -124,96 +123,121 @@ export HOME="$(getent passwd ubuntu | cut -d: -f6)"
 # Load order guide (iloveitaly/dotfiles .zsh_plugins):
 #   wait'0a' — PATH/tooling needed ASAP (mise)
 #   wait'0b' — after mise (direnv)
+#
+# Agent invariants live under /etc so a later home-directory rsync (dotfiles)
+# does not clobber them:
+#   /etc/zsh/zshenv          — every zsh (incl. non-interactive)
+#   /etc/mise/miserc.toml    — MISE_ENV selection before project config
+#   /etc/mise/config.toml    — trusted /workspace + global uv (gh if missing)
+#   /etc/environment         — PAM / sudo sessions (MISE_ENV only)
 
 # MISE_ENV selects mise.<env>.toml (including .config/mise.<env>.toml).
-# dev,extras is tied to the assumed config of
+# Tied to the assumed config of
 # https://github.com/iloveitaly/python-starter-template/
 # (.config/mise.dev.toml and .config/mise.extras.toml).
-# Exported for ubuntu shells, and written to ~/.config/mise/miserc.toml so
-# non-interactive mise loads the same files. MISE_ENV cannot live in mise
-# config.toml; that file is read too late.
 export MISE_ENV=dev,extras
 
 if ! command -v mise >/dev/null 2>&1; then
   curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
 fi
 
-env_header=$(cat <<'EOF'
-# Headless agent installs have no 1Password app. Keep desktop integration off
-# so later shells (just, direnv, mise) do not wait on it.
-export OP_INTEGRATION_DISABLED=1
-# MISE_ENV=dev,extras is tied to the assumed config of
-# https://github.com/iloveitaly/python-starter-template/
-# (.config/mise.dev.toml and .config/mise.extras.toml).
-export MISE_ENV=dev,extras
-EOF
-)
-
-# Prepend before stock ~/.bashrc's non-interactive `case $- in ... return` guard.
-# zsh always reads ~/.zshenv before ~/.zshrc, so ~/.zshenv covers all zsh shells.
-for rc in "$HOME/.bashrc" "$HOME/.zshenv"; do
-  touch "$rc"
-  if ! grep -qxF 'export MISE_ENV=dev,extras' "$rc"; then
-    existing="$(cat "$rc")"
-    printf '%s\n%s\n' "$env_header" "$existing" > "$rc"
-  fi
-done
-
-# Put mise shims on PATH in ~/.zshenv so non-interactive `zsh -c` finds mise tools.
-if ! grep -qxF 'eval "$(mise activate zsh --shims)"' "$HOME/.zshenv"; then
-  echo 'eval "$(mise activate zsh --shims)"' >> "$HOME/.zshenv"
-fi
-
-# PAM login and `sudo` sessions read /etc/environment.
-for entry in 'OP_INTEGRATION_DISABLED=1' 'MISE_ENV=dev,extras'; do
-  if ! grep -qxF "$entry" /etc/environment 2>/dev/null; then
-    printf '%s\n' "$entry" >> /etc/environment
-  fi
-done
-
-# Interactive shell hooks: mise first (wait'0a'), then direnv (wait'0b').
-touch "$HOME/.bashrc" "$HOME/.zshrc"
-for line in 'eval "$(mise activate bash)"' 'eval "$(direnv hook bash)"'; do
-  grep -qxF "$line" "$HOME/.bashrc" || echo "$line" >> "$HOME/.bashrc"
-done
-for line in 'eval "$(mise activate zsh)"' 'eval "$(direnv hook zsh)"'; do
-  grep -qxF "$line" "$HOME/.zshrc" || echo "$line" >> "$HOME/.zshrc"
-done
-
-# Cursor cloud agents mount the repo at /workspace — trust configs there without prompts.
-# Cloud images often already have `gh`; only add it to mise when missing.
-mkdir -p "$HOME/.config/mise"
+# System mise config (lowest precedence; survives ~/.config/mise rsync).
+# Directory is root:ubuntu 775 so `mise lock -g` as ubuntu can write mise.lock.
+# Write this before lineinfile: the pypi backend needs uv from this config.
+mkdir -p /etc/mise
+chown root:ubuntu /etc/mise
+chmod 0775 /etc/mise
 {
   cat <<'EOF'
 [settings]
 trusted_config_paths = ["/workspace"]
 
 [tools]
+# python: required for locked pypi:* graph installs (e.g. lineinfile)
+python = "3"
 uv = "latest"
+"pypi:lineinfile" = "latest"
 EOF
   if ! command -v gh >/dev/null 2>&1; then
     echo 'gh = "latest"'
   fi
-} > "$HOME/.config/mise/config.toml"
+} > /etc/mise/config.toml
 
-# Same dev,extras selection as the shell export above. miserc is read before
-# project config, which is what makes MISE_ENV apply to every mise invocation.
-cat > "$HOME/.config/mise/miserc.toml" <<'EOF'
+# miserc is read before project config; env cannot live in config.toml.
+cat > /etc/mise/miserc.toml <<'EOF'
 # Tied to the assumed config of
 # https://github.com/iloveitaly/python-starter-template/
 # (.config/mise.dev.toml and .config/mise.extras.toml).
 env = ["dev", "extras"]
 EOF
+chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
 
-# Whitelist /workspace so .envrc loads without `direnv allow` on first shell.
-mkdir -p "$HOME/.config/direnv"
+# Drop user-level copies from older installs so they cannot override /etc/mise.
+rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
+
+mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise" "$HOME/.local/share/mise"
 cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 [whitelist]
 prefix = ["/workspace"]
 EOF
-
+touch "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
-chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config" "$HOME/.local"
+
+# Global tools (uv + lineinfile; gh if declared). pypi backend needs uv.
+sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install
+
+# System zshenv snippet: local file when present (image build, mounted tests),
+# otherwise the copy published next to install.sh on master (curl | bash).
+zshenv_snippet=/etc/zsh/agent-containers.zshenv
+if [[ -f "$(dirname "$0")/snippets/zshenv" ]]; then
+  install -m 0644 "$(dirname "$0")/snippets/zshenv" "$zshenv_snippet"
+elif [[ -f /tmp/snippets/zshenv ]]; then
+  install -m 0644 /tmp/snippets/zshenv "$zshenv_snippet"
+else
+  curl --retry 3 --retry-delay 5 -fsSL \
+    https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/snippets/zshenv \
+    -o "$zshenv_snippet"
+  chmod 0644 "$zshenv_snippet"
+fi
+mise exec -- lineinfile add --create \
+  --line "source ${zshenv_snippet}" \
+  --regexp 'agent-containers\.zshenv' \
+  /etc/zsh/zshenv
+
+# PAM login and sudo sessions. Do not persist OP_INTEGRATION_DISABLED.
+mise exec -- lineinfile add --create \
+  --line 'MISE_ENV=dev,extras' --regexp '^MISE_ENV=' \
+  /etc/environment
+mise exec -- lineinfile remove \
+  --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+  /etc/environment
+
+# Bash: stock ~/.bashrc returns early when non-interactive, so put MISE_ENV at BOF.
+# Drop OP_INTEGRATION_DISABLED left by older installs (install-process-only).
+mise exec -- lineinfile add --create --bof \
+  --line 'export MISE_ENV=dev,extras' --regexp '^export MISE_ENV=' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile remove \
+  --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile remove \
+  --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+  "$HOME/.zshenv"
+
+# Interactive shell hooks: mise first (wait'0a'), then direnv (wait'0b').
+mise exec -- lineinfile add --create \
+  --line 'eval "$(mise activate bash)"' --regexp 'mise activate bash' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile add --create \
+  --line 'eval "$(direnv hook bash)"' --regexp 'direnv hook bash' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile add --create \
+  --line 'eval "$(mise activate zsh)"' --regexp 'mise activate zsh' \
+  "$HOME/.zshrc"
+mise exec -- lineinfile add --create \
+  --line 'eval "$(direnv hook zsh)"' --regexp 'direnv hook zsh' \
+  "$HOME/.zshrc"
 
 ########################################################
 # UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
@@ -226,8 +250,10 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.co
 # dockerd. `--skip-services` omits those steps. `start.sh` runs `just setup`
 # on container start. Probe `just --usage setup` so a recipe without that
 # flag still runs as `just setup`.
+#
+# OP_INTEGRATION_DISABLED is install-process-only (not in start.sh).
 
-sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 bash -euo pipefail -c '
+sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras bash -euo pipefail -c '
   cd "$1"
 
   if [ -f .envrc ]; then
@@ -235,9 +261,8 @@ sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 bash -euo pipefail -c '
     direnv allow .
   fi
 
-  # Install global mise tools, plus project tools when a project mise config is present.
-  # Lock the global config (~/.config/mise/mise.lock) so projects with `locked = true`
-  # (e.g. railpack) do not fail resolving global tools like uv/gh.
+  # Lock + install system/global tools (lockfile: /etc/mise/mise.lock), plus
+  # project tools when a project mise config is present.
   mise lock -g --platform linux-x64,linux-arm64
   mise install
 
