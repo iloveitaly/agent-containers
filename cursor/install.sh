@@ -73,8 +73,8 @@ for cmd in zsh direnv git; do
   fi
 done
 
-# NSS cert tools (certutil). Not on Cursor's default image; needed for
-# mkcert / Firefox / Chromium trust-store workflows.
+# NSS cert tools (certutil). Not on Cursor's default image; required by
+# localias (and mkcert / Chromium NSS trust-store workflows).
 if ! command -v certutil >/dev/null 2>&1; then
   packages+=(libnss3-tools)
 fi
