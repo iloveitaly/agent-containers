@@ -203,7 +203,10 @@ lineinfile "$HOME/.zshrc" 'eval "$(mise activate zsh)"' 'mise activate zsh'
 lineinfile "$HOME/.zshrc" 'eval "$(direnv hook zsh)"' 'direnv hook zsh'
 
 # System mise config (lowest precedence; survives ~/.config/mise rsync).
+# Directory is root:ubuntu 775 so `mise lock -g` as ubuntu can write mise.lock.
 mkdir -p /etc/mise
+chown root:ubuntu /etc/mise
+chmod 0775 /etc/mise
 {
   cat <<'EOF'
 [settings]
@@ -230,19 +233,14 @@ chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
 rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
 
 # Whitelist /workspace so .envrc loads without `direnv allow` on first shell.
-mkdir -p "$HOME/.config/direnv"
+mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise"
 cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 [whitelist]
 prefix = ["/workspace"]
 EOF
 
 chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
-chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
-
-# Lock system tools as root: `mise lock -g` writes /etc/mise/mise.lock next to
-# the system config, which the ubuntu user cannot create.
-mise lock -g --platform linux-x64,linux-arm64
-chmod 0644 /etc/mise/mise.lock
+chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config" "$HOME/.local"
 
 ########################################################
 # UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
@@ -266,8 +264,9 @@ sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras bash -euo
     direnv allow .
   fi
 
-  # Install system/global mise tools, plus project tools when a project mise
-  # config is present. Lockfile lives in /etc/mise (written as root above).
+  # Lock + install system/global tools (lockfile: /etc/mise/mise.lock), plus
+  # project tools when a project mise config is present.
+  mise lock -g --platform linux-x64,linux-arm64
   mise install
 
   # Extensions install into $HOME/.local/share/gh/extensions.
