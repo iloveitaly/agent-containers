@@ -326,9 +326,10 @@ fi
 # exists, then runs the recipe. `mise exec -- just setup` would skip .envrc.
 #
 # python-starter-template's setup starts docker compose (`docker_up`) and
-# seeds the DB. Cursor Cloud `install` has the docker CLI but not a daemon
-# (`start.sh` starts dockerd). `--skip-services` omits those steps. Probe
-# `just --usage setup` so a recipe without that flag still runs as `just setup`.
+# seeds the DB. This script runs while the snapshot is built, before
+# dockerd. `--skip-services` omits those steps. `start.sh` runs `just setup`
+# on container start. Probe `just --usage setup` so a recipe without that
+# flag still runs as `just setup`.
 
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
   # just is a project tool. Skip setup when this project does not install it.
