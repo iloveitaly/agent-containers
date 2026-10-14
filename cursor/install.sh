@@ -236,6 +236,9 @@ sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 bash -euo pipefail -c '
   fi
 
   # Install global mise tools, plus project tools when a project mise config is present.
+  # Lock the global config (~/.config/mise/mise.lock) so projects with `locked = true`
+  # (e.g. railpack) do not fail resolving global tools like uv/gh.
+  mise lock -g --platform linux-x64,linux-arm64
   mise install
 
   # Extensions install into $HOME/.local/share/gh/extensions.
