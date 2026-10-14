@@ -262,6 +262,13 @@ mise exec -- lineinfile add --create \
 sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras bash -euo pipefail -c '
   cd "$1"
 
+  # Shared NSS DB for Chromium / localias (certutil from libnss3-tools).
+  # The package does not create this; without it, trust-store installs fail.
+  mkdir -p "$HOME/.pki/nssdb"
+  if [ ! -f "$HOME/.pki/nssdb/cert9.db" ]; then
+    certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
+  fi
+
   if [ -f .envrc ]; then
     echo "Trusting .envrc in $PWD"
     direnv allow .
