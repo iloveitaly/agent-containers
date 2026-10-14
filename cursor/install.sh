@@ -187,47 +187,47 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.co
 # Global tools (uv + lineinfile; gh if declared). pypi backend needs uv.
 sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install
 
-# Idempotent line edits via global `lineinfile` CLI. Args: FILE LINE [REGEXP] [bof|eof]
-lineinfile() {
-  local file="$1" line="$2" regexp="${3:-}" where="${4:-eof}"
-  local -a args=(add --create --line "$line")
-  [[ -n "$regexp" ]] && args+=(--regexp "$regexp")
-  [[ "$where" == "bof" ]] && args+=(--bof)
-  args+=("$file")
-  mise exec -- lineinfile "${args[@]}"
-}
-
-# Drop install-only OP flag left by older agent-containers installs.
-remove_op_integration_lines() {
-  local file="$1"
-  [[ -f "$file" ]] || return 0
-  mise exec -- lineinfile remove \
-    --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
-    "$file"
-}
-
 # System zshenv: MISE_ENV + shims for all zsh invocations.
-lineinfile /etc/zsh/zshenv \
-  'export MISE_ENV=dev,extras' \
-  '^export MISE_ENV='
-lineinfile /etc/zsh/zshenv \
-  'eval "$(mise activate zsh --shims)"' \
-  'mise activate zsh --shims'
+mise exec -- lineinfile add --create \
+  --line 'export MISE_ENV=dev,extras' --regexp '^export MISE_ENV=' \
+  /etc/zsh/zshenv
+mise exec -- lineinfile add --create \
+  --line 'eval "$(mise activate zsh --shims)"' --regexp 'mise activate zsh --shims' \
+  /etc/zsh/zshenv
 
-# PAM login and sudo sessions. Do not persist OP_INTEGRATION_DISABLED here.
-lineinfile /etc/environment 'MISE_ENV=dev,extras' '^MISE_ENV='
-remove_op_integration_lines /etc/environment
+# PAM login and sudo sessions. Do not persist OP_INTEGRATION_DISABLED.
+mise exec -- lineinfile add --create \
+  --line 'MISE_ENV=dev,extras' --regexp '^MISE_ENV=' \
+  /etc/environment
+mise exec -- lineinfile remove \
+  --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+  /etc/environment
 
 # Bash: stock ~/.bashrc returns early when non-interactive, so put MISE_ENV at BOF.
-lineinfile "$HOME/.bashrc" 'export MISE_ENV=dev,extras' '^export MISE_ENV=' bof
-remove_op_integration_lines "$HOME/.bashrc"
-remove_op_integration_lines "$HOME/.zshenv"
+# Drop OP_INTEGRATION_DISABLED left by older installs (install-process-only).
+mise exec -- lineinfile add --create --bof \
+  --line 'export MISE_ENV=dev,extras' --regexp '^export MISE_ENV=' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile remove \
+  --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile remove \
+  --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+  "$HOME/.zshenv"
 
 # Interactive shell hooks: mise first (wait'0a'), then direnv (wait'0b').
-lineinfile "$HOME/.bashrc" 'eval "$(mise activate bash)"' 'mise activate bash'
-lineinfile "$HOME/.bashrc" 'eval "$(direnv hook bash)"' 'direnv hook bash'
-lineinfile "$HOME/.zshrc" 'eval "$(mise activate zsh)"' 'mise activate zsh'
-lineinfile "$HOME/.zshrc" 'eval "$(direnv hook zsh)"' 'direnv hook zsh'
+mise exec -- lineinfile add --create \
+  --line 'eval "$(mise activate bash)"' --regexp 'mise activate bash' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile add --create \
+  --line 'eval "$(direnv hook bash)"' --regexp 'direnv hook bash' \
+  "$HOME/.bashrc"
+mise exec -- lineinfile add --create \
+  --line 'eval "$(mise activate zsh)"' --regexp 'mise activate zsh' \
+  "$HOME/.zshrc"
+mise exec -- lineinfile add --create \
+  --line 'eval "$(direnv hook zsh)"' --regexp 'direnv hook zsh' \
+  "$HOME/.zshrc"
 
 ########################################################
 # UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
