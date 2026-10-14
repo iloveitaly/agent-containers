@@ -154,6 +154,7 @@ trusted_config_paths = ["/workspace"]
 
 [tools]
 uv = "latest"
+"pypi:lineinfile" = "latest"
 EOF
   if ! command -v gh >/dev/null 2>&1; then
     echo 'gh = "latest"'
@@ -181,33 +182,24 @@ touch "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config" "$HOME/.local"
 
-# uv first (pypi backend), then lineinfile for the rc/environment edits below.
-# Not system pip — avoids PEP 668 --break-system-packages.
-LINEINFILE_SPEC=pypi:lineinfile@0.5.2
-sudo -n -u ubuntu -H env MISE_ENV=dev,extras bash -euo pipefail -c '
-  mise install uv
-  mise install "$1"
-' bash "$LINEINFILE_SPEC"
+# Global tools (uv + lineinfile; gh if declared). pypi backend needs uv.
+sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install
 
-# Idempotent line edits (Ansible-style). Optional 3rd arg is a regexp: when it
-# matches, the line is replaced; otherwise the line is inserted (BOF if $4=bof).
-# HOME stays the ubuntu user so mise exec finds the pypi tool install above.
-# Install-only pypi tool: use its CLI via `mise x` (system python3 has no import).
-# Args: FILE LINE [REGEXP] [bof|eof]
+# Idempotent line edits via global `lineinfile` CLI. Args: FILE LINE [REGEXP] [bof|eof]
 lineinfile() {
   local file="$1" line="$2" regexp="${3:-}" where="${4:-eof}"
   local -a args=(add --create --line "$line")
   [[ -n "$regexp" ]] && args+=(--regexp "$regexp")
   [[ "$where" == "bof" ]] && args+=(--bof)
   args+=("$file")
-  mise x "$LINEINFILE_SPEC" -- lineinfile "${args[@]}"
+  mise exec -- lineinfile "${args[@]}"
 }
 
 # Drop install-only OP flag left by older agent-containers installs.
 remove_op_integration_lines() {
   local file="$1"
   [[ -f "$file" ]] || return 0
-  mise x "$LINEINFILE_SPEC" -- lineinfile remove \
+  mise exec -- lineinfile remove \
     --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
     "$file"
 }
