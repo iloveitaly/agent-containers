@@ -187,12 +187,22 @@ chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.co
 # Global tools (uv + lineinfile; gh if declared). pypi backend needs uv.
 sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install
 
-# System zshenv: MISE_ENV + shims for all zsh invocations.
+# System zshenv snippet: local file when present (image build, mounted tests),
+# otherwise the copy published next to install.sh on master (curl | bash).
+zshenv_snippet=/etc/zsh/agent-containers.zshenv
+if [[ -f "$(dirname "$0")/snippets/zshenv" ]]; then
+  install -m 0644 "$(dirname "$0")/snippets/zshenv" "$zshenv_snippet"
+elif [[ -f /tmp/snippets/zshenv ]]; then
+  install -m 0644 /tmp/snippets/zshenv "$zshenv_snippet"
+else
+  curl --retry 3 --retry-delay 5 -fsSL \
+    https://raw.githubusercontent.com/iloveitaly/agent-containers/master/cursor/snippets/zshenv \
+    -o "$zshenv_snippet"
+  chmod 0644 "$zshenv_snippet"
+fi
 mise exec -- lineinfile add --create \
-  --line 'export MISE_ENV=dev,extras' --regexp '^export MISE_ENV=' \
-  /etc/zsh/zshenv
-mise exec -- lineinfile add --create \
-  --line 'eval "$(mise activate zsh --shims)"' --regexp 'mise activate zsh --shims' \
+  --line "source ${zshenv_snippet}" \
+  --regexp 'agent-containers\.zshenv' \
   /etc/zsh/zshenv
 
 # PAM login and sudo sessions. Do not persist OP_INTEGRATION_DISABLED.

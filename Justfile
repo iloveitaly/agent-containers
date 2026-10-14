@@ -79,8 +79,9 @@ test-just-setup: build-cursor
 	  command -v uv
 	  command -v gh
 	  locale -a | grep -qiE "en_US\\.(utf8|UTF-8)"
-	  grep -qxF "export MISE_ENV=dev,extras" /etc/zsh/zshenv
-	  grep -qF "mise activate zsh --shims" /etc/zsh/zshenv
+	  grep -qF "source /etc/zsh/agent-containers.zshenv" /etc/zsh/zshenv
+	  grep -qxF "export MISE_ENV=dev,extras" /etc/zsh/agent-containers.zshenv
+	  grep -qF "mise activate zsh --shims" /etc/zsh/agent-containers.zshenv
 	  grep -qxF "MISE_ENV=dev,extras" /etc/environment
 	  ! grep -q "OP_INTEGRATION_DISABLED" /etc/environment
 	  ! grep -q "OP_INTEGRATION_DISABLED" /home/ubuntu/.zshenv /home/ubuntu/.bashrc /etc/zsh/zshenv
@@ -93,6 +94,7 @@ test-just-setup: build-cursor
 	# No justfile: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$PWD/cursor/snippets/zshenv:/tmp/snippets/zshenv:ro" \
 	  -v "$tmp/none:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
@@ -101,6 +103,7 @@ test-just-setup: build-cursor
 	# Justfile without a setup recipe: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$PWD/cursor/snippets/zshenv:/tmp/snippets/zshenv:ro" \
 	  -v "$tmp/nosetup:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
@@ -109,6 +112,7 @@ test-just-setup: build-cursor
 	# Setup recipe, but just is not installed via mise: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$PWD/cursor/snippets/zshenv:/tmp/snippets/zshenv:ro" \
 	  -v "$tmp/setup:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
@@ -117,6 +121,7 @@ test-just-setup: build-cursor
 	# Setup recipe with just in mise.toml, and an .envrc outside /workspace.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$PWD/cursor/snippets/zshenv:/tmp/snippets/zshenv:ro" \
 	  -v "$tmp/setup-with-just:/workspace" \
 	  -v "$tmp/setup-with-envrc:/opt/app" \
 	  -w /workspace \
@@ -135,6 +140,7 @@ test-just-setup: build-cursor
 	# Setup recipe that lists --skip-services: install.sh must pass that flag.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
+	  -v "$PWD/cursor/snippets/zshenv:/tmp/snippets/zshenv:ro" \
 	  -v "$tmp/setup-skip-services:/workspace" \
 	  -w /workspace \
 	  ubuntu-docker-mise-direnv:local bash -c '

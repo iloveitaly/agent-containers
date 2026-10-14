@@ -1,0 +1,9 @@
+# Agent-containers: sourced from /etc/zsh/zshenv on every zsh invocation,
+# including non-interactive shells. Kept out of ~/.zshenv so a home-directory
+# rsync cannot drop it.
+#
+# MISE_ENV selects mise.<env>.toml (including .config/mise.<env>.toml).
+# Tied to https://github.com/iloveitaly/python-starter-template/
+# (.config/mise.dev.toml and .config/mise.extras.toml).
+export MISE_ENV=dev,extras
+eval "$(mise activate zsh --shims)"
