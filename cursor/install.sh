@@ -192,33 +192,24 @@ sudo -n -u ubuntu -H env MISE_ENV=dev,extras bash -euo pipefail -c '
 # Idempotent line edits (Ansible-style). Optional 3rd arg is a regexp: when it
 # matches, the line is replaced; otherwise the line is inserted (BOF if $4=bof).
 # HOME stays the ubuntu user so mise exec finds the pypi tool install above.
-# `mise x` activates install-only pypi:lineinfile (not in config.toml).
-# Use python -c (not a heredoc): a trailing `<<` attaches to `mise x`, not python.
+# Install-only pypi tool: use its CLI via `mise x` (system python3 has no import).
+# Args: FILE LINE [REGEXP] [bof|eof]
 lineinfile() {
   local file="$1" line="$2" regexp="${3:-}" where="${4:-eof}"
-  LINE="$line" REGEXP="$regexp" WHERE="$where" FILE="$file" \
-    mise x "$LINEINFILE_SPEC" -- python3 -c '
-import os
-from lineinfile import AtBOF, add_line_to_file
-
-path = os.environ["FILE"]
-line = os.environ["LINE"]
-regexp = os.environ["REGEXP"] or None
-inserter = AtBOF() if os.environ["WHERE"] == "bof" else None
-add_line_to_file(path, line, regexp=regexp, inserter=inserter, create=True)
-'
+  local -a args=(add --create --line "$line")
+  [[ -n "$regexp" ]] && args+=(--regexp "$regexp")
+  [[ "$where" == "bof" ]] && args+=(--bof)
+  args+=("$file")
+  mise x "$LINEINFILE_SPEC" -- lineinfile "${args[@]}"
 }
 
 # Drop install-only OP flag left by older agent-containers installs.
 remove_op_integration_lines() {
   local file="$1"
   [[ -f "$file" ]] || return 0
-  FILE="$file" mise x "$LINEINFILE_SPEC" -- python3 -c '
-import os
-from lineinfile import remove_lines_from_file
-
-remove_lines_from_file(os.environ["FILE"], r"^(export )?OP_INTEGRATION_DISABLED=")
-'
+  mise x "$LINEINFILE_SPEC" -- lineinfile remove \
+    --regexp '^(export )?OP_INTEGRATION_DISABLED=' \
+    "$file"
 }
 
 # System zshenv: MISE_ENV + shims for all zsh invocations.
