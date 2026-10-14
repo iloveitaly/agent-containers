@@ -3,30 +3,32 @@ set -euo pipefail
 
 # Headless installs have no 1Password desktop app. `op` (from a just recipe,
 # a .envrc, or a mise hook) otherwise waits on that app. Set this before any
-# of those run. `sudo -E` below keeps it across the root re-exec; `as_ubuntu`
-# passes it again because `sudo -u` resets the environment.
+# of those run. `sudo -E` below keeps it across the root re-exec; the ubuntu
+# subshell at the end passes it again because `sudo -u` resets the environment.
 export OP_INTEGRATION_DISABLED=1
 
 # Cursor Cloud `install` runs as ubuntu (passwordless sudo). Docker image
-# builds and "fresh Ubuntu host" runs are already root. Re-exec so apt/gpg
-# can write /etc/apt/keyrings and the rest of this script can run as root.
+# builds and "fresh Ubuntu host" runs are already root. Re-exec so apt can
+# write /etc/apt/keyrings and the rest of this script can run as root.
 if [ "$(id -u)" -ne 0 ]; then
   if ! sudo -n true 2>/dev/null; then
     echo "install.sh must run as root or with passwordless sudo" >&2
     exit 1
   fi
   # `curl | bash` feeds the script on stdin ($0 is bash /usr/bin/bash).
-  # `bash cursor/install.sh` has a real script path in $0.
+  # Pass -euo pipefail explicitly because the outer shell already consumed the
+  # header lines from stdin before exec'ing into root bash.
   case "$0" in
     bash|sh|-|*/bash|*/sh)
-      exec sudo -n -E bash -s "$@"
+      exec sudo -n -E bash -euo pipefail -s "$@"
       ;;
     *)
-      exec sudo -n -E bash "$0" "$@"
+      exec sudo -n -E bash -euo pipefail "$0" "$@"
       ;;
   esac
 fi
 
+export OP_INTEGRATION_DISABLED=1
 export DEBIAN_FRONTEND=noninteractive
 
 # Written to /etc/apt so later apt-get in this script picks it up.
@@ -41,7 +43,6 @@ EOF
 
 packages=()
 need_docker=false
-need_direnv=false
 
 ########################################################
 # DOCKER APT SOURCE
@@ -49,18 +50,16 @@ need_direnv=false
 
 if ! command -v docker >/dev/null 2>&1; then
   need_docker=true
-  install -m 0755 -d /etc/apt/keyrings /root/.gnupg
-  chmod 700 /root/.gnupg
-  # --batch/--yes: overwrite without prompting (no /dev/tty in Cloud Agent install).
-  # GNUPGHOME under /root avoids "unsafe ownership" when HOME is still ubuntu's.
+  install -m 0755 -d /etc/apt/keyrings
   curl --retry 3 --retry-delay 5 -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --homedir /root/.gnupg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-$(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+    -o /etc/apt/keyrings/docker.asc
+  chmod a+r /etc/apt/keyrings/docker.asc
+  codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
+  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${codename} stable" \
+    > /etc/apt/sources.list.d/docker.list
   packages+=(
-    docker-ce=5:28.5.2-1~ubuntu.24.04~noble
-    docker-ce-cli=5:28.5.2-1~ubuntu.24.04~noble
+    "docker-ce=5:28.5.2-1~ubuntu.24.04~${codename}"
+    "docker-ce-cli=5:28.5.2-1~ubuntu.24.04~${codename}"
     containerd.io
     docker-buildx-plugin
     docker-compose-plugin
@@ -69,25 +68,18 @@ $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.
   )
 fi
 
-if ! command -v zsh >/dev/null 2>&1; then
-  packages+=(zsh)
-fi
-
-if ! command -v direnv >/dev/null 2>&1; then
-  need_direnv=true
-  packages+=(direnv)
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-  packages+=(git)
-fi
+for cmd in zsh direnv git; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    packages+=("$cmd")
+  fi
+done
 
 if ((${#packages[@]})); then
   apt-get update
   # Acquire::Retries covers dropped connections, not HTTP 400 from
   # archive.ubuntu.com/Cloudflare. Retry the install only — lists stay cached.
   attempt=1
-  until apt-get install -y -- "${packages[@]}"; do
+  until apt-get install -y --no-install-recommends -- "${packages[@]}"; do
     if ((attempt >= 5)); then
       echo "apt-get install failed after ${attempt} attempts: ${packages[*]}" >&2
       exit 1
@@ -119,115 +111,75 @@ fi
 
 # Create non-root user (only if it doesn't exist); default shell is zsh.
 id -u ubuntu &>/dev/null || useradd -m -s /bin/zsh ubuntu
-chsh -s /bin/zsh ubuntu
-# Create docker group if it doesn't exist and add ubuntu user to it
-groupadd -f docker && usermod -aG docker ubuntu
-usermod -aG sudo ubuntu
-# Configure passwordless sudo for ubuntu user
+groupadd -f docker
+usermod -s /bin/zsh -aG docker,sudo ubuntu
 echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/ubuntu
-# Set a password for ubuntu user
-echo "ubuntu:ubuntu" | chpasswd
 
-# This script stays root so it can apt-install and write /etc. Mise, direnv's
-# allow database, and gh extensions belong to ubuntu.
-# -H sets HOME to that user. -n fails instead of prompting if sudo needs a password.
-as_ubuntu() {
-  # env_reset on `sudo -u` would drop OP_INTEGRATION_DISABLED. Set it on the
-  # ubuntu command so direnv, mise, and just setup all inherit it.
-  sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 "$@"
-}
-
-# Run a command as ubuntu after cd'ing to the project root.
-# That is the directory install.sh was started in ($PWD): Cursor's /workspace,
-# or wherever `curl | bash` was run. sudo does not promise to keep that cwd.
-as_ubuntu_in_project() {
-  as_ubuntu bash -c 'cd "$1" && shift && exec "$@"' bash "$PWD" "$@"
-}
-
-# Run a command as ubuntu in the project root, with mise applied and then
-# .envrc. `direnv exec` applies .envrc to the command. The shell hook is
-# `eval "$(direnv export bash)"` because a child process cannot change the
-# parent shell's environment; there is no other way to load that diff here.
-with_mise_and_direnv() {
-  as_ubuntu bash -c '
-    set -euo pipefail
-    cd "$1" || exit 1
-    shift
-    mise_activate="$(mise activate bash)"
-    eval "$mise_activate"
-    # Set again after mise activate, before .envrc and the recipe. direnv
-    # keeps variables already in the environment unless .envrc unsets them.
-    export OP_INTEGRATION_DISABLED=1
-    if [ -f .envrc ]; then
-      exec direnv exec . "$@"
-    fi
-    exec "$@"
-  ' bash "$PWD" "$@"
-}
-
-# Script runs as root during image build; point HOME at the ubuntu user.
+# Script runs as root; point HOME at the ubuntu user for rc/config writes.
 export HOME="$(getent passwd ubuntu | cut -d: -f6)"
-touch "$HOME/.bashrc" "$HOME/.zshrc"
 
 ########################################################
-# MISE INSTALL
+# MISE & DIRENV CONFIG
 ########################################################
 # Load order guide (iloveitaly/dotfiles .zsh_plugins):
 #   wait'0a' — PATH/tooling needed ASAP (mise)
-# Shell hook must run before direnv.
+#   wait'0b' — after mise (direnv)
 
 # MISE_ENV selects mise.<env>.toml (including .config/mise.<env>.toml).
 # dev,extras is tied to the assumed config of
 # https://github.com/iloveitaly/python-starter-template/
 # (.config/mise.dev.toml and .config/mise.extras.toml).
 # Exported for ubuntu shells, and written to ~/.config/mise/miserc.toml so
-# non-interactive mise (agent commands, `as_ubuntu`) loads the same
-# files. MISE_ENV cannot live in mise config.toml; that file is read too late.
+# non-interactive mise loads the same files. MISE_ENV cannot live in mise
+# config.toml; that file is read too late.
 export MISE_ENV=dev,extras
-mise_env_snippet=$(cat <<'EOF'
+
+if ! command -v mise >/dev/null 2>&1; then
+  curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
+fi
+
+env_header=$(cat <<'EOF'
+# Headless agent installs have no 1Password app. Keep desktop integration off
+# so later shells (just, direnv, mise) do not wait on it.
+export OP_INTEGRATION_DISABLED=1
 # MISE_ENV=dev,extras is tied to the assumed config of
 # https://github.com/iloveitaly/python-starter-template/
 # (.config/mise.dev.toml and .config/mise.extras.toml).
 export MISE_ENV=dev,extras
 EOF
 )
-op_integration_snippet=$(cat <<'EOF'
-# Headless agent installs have no 1Password app. Keep desktop integration off
-# so later shells (just, direnv, mise) do not wait on it.
-export OP_INTEGRATION_DISABLED=1
-EOF
-)
-for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"; do
+
+# Prepend before stock ~/.bashrc's non-interactive `case $- in ... return` guard.
+# zsh always reads ~/.zshenv before ~/.zshrc, so ~/.zshenv covers all zsh shells.
+for rc in "$HOME/.bashrc" "$HOME/.zshenv"; do
   touch "$rc"
   if ! grep -qxF 'export MISE_ENV=dev,extras' "$rc"; then
-    tmp="$(mktemp)"
-    printf '%s\n' "$mise_env_snippet" | cat - "$rc" > "$tmp"
-    mv "$tmp" "$rc"
-  fi
-  if ! grep -qxF 'export OP_INTEGRATION_DISABLED=1' "$rc"; then
-    tmp="$(mktemp)"
-    printf '%s\n' "$op_integration_snippet" | cat - "$rc" > "$tmp"
-    mv "$tmp" "$rc"
+    existing="$(cat "$rc")"
+    printf '%s\n%s\n' "$env_header" "$existing" > "$rc"
   fi
 done
-# PAM login and `sudo` sessions read this. Shell rc above covers interactive
-# and zsh non-interactive shells that do not go through PAM.
-if ! grep -qxF 'OP_INTEGRATION_DISABLED=1' /etc/environment 2>/dev/null; then
-  printf '%s\n' 'OP_INTEGRATION_DISABLED=1' >> /etc/environment
+
+# Put mise shims on PATH in ~/.zshenv so non-interactive `zsh -c` finds mise tools.
+if ! grep -qxF 'eval "$(mise activate zsh --shims)"' "$HOME/.zshenv"; then
+  echo 'eval "$(mise activate zsh --shims)"' >> "$HOME/.zshenv"
 fi
 
-# Install mise only if the mise CLI is not already present
-if ! command -v mise >/dev/null 2>&1; then
-  curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
-  # Activate mise for interactive shells (bash + zsh). mise first, matching wait'0a'.
-  touch "$HOME/.bashrc" "$HOME/.zshrc"
-  cat >> "$HOME/.bashrc" <<'EOF'
-eval "$(mise activate bash)"
-EOF
-  cat >> "$HOME/.zshrc" <<'EOF'
-eval "$(mise activate zsh)"
-EOF
-fi
+# PAM login and `sudo` sessions read /etc/environment.
+for entry in 'OP_INTEGRATION_DISABLED=1' 'MISE_ENV=dev,extras'; do
+  if ! grep -qxF "$entry" /etc/environment 2>/dev/null; then
+    printf '%s\n' "$entry" >> /etc/environment
+  fi
+done
+
+# Interactive shell hooks: mise first (wait'0a'), then direnv (wait'0b').
+touch "$HOME/.bashrc" "$HOME/.zshrc"
+for line in 'eval "$(mise activate bash)"' 'eval "$(direnv hook bash)"'; do
+  grep -qxF "$line" "$HOME/.bashrc" || echo "$line" >> "$HOME/.bashrc"
+done
+for line in 'eval "$(mise activate zsh)"' 'eval "$(direnv hook zsh)"'; do
+  grep -qxF "$line" "$HOME/.zshrc" || echo "$line" >> "$HOME/.zshrc"
+done
+
 # Cursor cloud agents mount the repo at /workspace — trust configs there without prompts.
 # Cloud images often already have `gh`; only add it to mise when missing.
 mkdir -p "$HOME/.config/mise"
@@ -243,6 +195,7 @@ EOF
     echo 'gh = "latest"'
   fi
 } > "$HOME/.config/mise/config.toml"
+
 # Same dev,extras selection as the shell export above. miserc is read before
 # project config, which is what makes MISE_ENV apply to every mise invocation.
 cat > "$HOME/.config/mise/miserc.toml" <<'EOF'
@@ -251,79 +204,22 @@ cat > "$HOME/.config/mise/miserc.toml" <<'EOF'
 # (.config/mise.dev.toml and .config/mise.extras.toml).
 env = ["dev", "extras"]
 EOF
-chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
 
-########################################################
-# DIRENV HOOKS
-########################################################
-# Load order guide (iloveitaly/dotfiles .zsh_plugins):
-#   wait'0b' — after mise (see 0b/direnv.zsh)
-# Hook must run after mise so direnv inherits the mise-managed PATH.
-
-if $need_direnv; then
-  # Activate direnv after mise (bash + zsh), matching 0b/direnv.zsh.
-  touch "$HOME/.bashrc" "$HOME/.zshrc"
-  cat >> "$HOME/.bashrc" <<'EOF'
-eval "$(direnv hook bash)"
-EOF
-  cat >> "$HOME/.zshrc" <<'EOF'
-eval "$(direnv hook zsh)"
-EOF
-fi
 # Whitelist /workspace so .envrc loads without `direnv allow` on first shell.
 mkdir -p "$HOME/.config/direnv"
 cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
 [whitelist]
 prefix = ["/workspace"]
 EOF
+
+chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
 
-# Trust the project .envrc now that direnv is installed. The `/workspace`
-# whitelist covers Cursor Cloud; `direnv allow` also trusts an install root
-# outside that prefix. Allow does not execute the file. `with_mise_and_direnv`
-# does, via `direnv exec`, when it runs `just setup`.
-if [ -f .envrc ]; then
-  echo "Trusting .envrc in $PWD"
-  # Record trust only. .envrc runs later, inside with_mise_and_direnv.
-  as_ubuntu_in_project direnv allow .
-fi
-
 ########################################################
-# GLOBAL MISE TOOLS
+# UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
 ########################################################
-# Tools from ~/.config/mise/config.toml (`mise use -g`).
-# gh-ai-pr is a uv inline script (`#!/usr/bin/env -S uv run --script`).
-
-# Install global mise tools, plus project tools when a project mise config is present.
-as_ubuntu_in_project mise install
-
-########################################################
-# GH AI-PR EXTENSION
-########################################################
-# Extensions install into $HOME/.local/share/gh/extensions. The agent
-# session runs as ubuntu, so install as that user (not root).
-# Prefer an already-installed gh; otherwise `mise exec` puts mise gh on PATH.
-# Do not use `gh extension list` here: unauthenticated gh (Docker image
-# builds, fresh hosts) exits with "please run: gh auth login".
-
-gh_ai_pr_dir="$(getent passwd ubuntu | cut -d: -f6)/.local/share/gh/extensions/gh-ai-pr"
-if [ ! -d "$gh_ai_pr_dir" ]; then
-  if command -v gh >/dev/null 2>&1; then
-    as_ubuntu gh extension install iloveitaly/gh-ai-pr
-  else
-    as_ubuntu mise exec -- gh extension install iloveitaly/gh-ai-pr
-  fi
-fi
-
-########################################################
-# OPTIONAL PROJECT `just setup`
-########################################################
-# `install` runs from the app root (Cursor Cloud and curl|bash). Docker image
-# builds have no project justfile in $PWD, so this is a no-op there.
-# Do not install just ourselves: projects that need it put it in mise.
-#
-# `with_mise_and_direnv` activates mise, then `direnv exec` when .envrc
-# exists, then runs the recipe. `mise exec -- just setup` would skip .envrc.
+# Mise, direnv's allow database, and gh extensions belong to ubuntu.
+# Run the user-space setup in a single ubuntu subshell in the project root ($PWD).
 #
 # python-starter-template's setup starts docker compose (`docker_up`) and
 # seeds the DB. This script runs while the snapshot is built, before
@@ -331,22 +227,39 @@ fi
 # on container start. Probe `just --usage setup` so a recipe without that
 # flag still runs as `just setup`.
 
-if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-  # just is a project tool. Skip setup when this project does not install it.
-  if as_ubuntu_in_project mise which just >/dev/null 2>&1; then
-    # Confirm the justfile defines a setup recipe before running it.
-    if as_ubuntu_in_project mise exec -- just --show setup >/dev/null 2>&1; then
+sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 bash -euo pipefail -c '
+  cd "$1"
+
+  if [ -f .envrc ]; then
+    echo "Trusting .envrc in $PWD"
+    direnv allow .
+  fi
+
+  # Install global mise tools, plus project tools when a project mise config is present.
+  # Lock the global config (~/.config/mise/mise.lock) so projects with `locked = true`
+  # (e.g. railpack) do not fail resolving global tools like uv/gh.
+  mise lock -g --platform linux-x64,linux-arm64
+  mise install
+
+  # Extensions install into $HOME/.local/share/gh/extensions.
+  # Do not use `gh extension list`: unauthenticated gh exits nonzero.
+  gh_ai_pr_dir="$HOME/.local/share/gh/extensions/gh-ai-pr"
+  if [ ! -d "$gh_ai_pr_dir" ]; then
+    mise exec -- gh extension install iloveitaly/gh-ai-pr
+  fi
+
+  if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
+    if ! mise which just >/dev/null 2>&1; then
+      echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
+    elif usage="$(mise exec -- just --usage setup 2>/dev/null)"; then
       setup_cmd=(just setup)
-      if as_ubuntu_in_project mise exec -- just --usage setup 2>/dev/null | grep -q -- '--skip-services'; then
-        setup_cmd+=( --skip-services)
+      if grep -q -- "--skip-services" <<<"$usage"; then
+        setup_cmd+=(--skip-services)
       fi
       echo "Running ${setup_cmd[*]} in $PWD"
-      # mise hook-env, then .envrc, then the recipe.
-      with_mise_and_direnv "${setup_cmd[@]}"
+      mise exec -- direnv exec . "${setup_cmd[@]}"
     else
       echo "justfile found in $PWD but no setup recipe; skipping"
     fi
-  else
-    echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
   fi
-fi
+' bash "$PWD"
