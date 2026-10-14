@@ -73,11 +73,6 @@ for cmd in zsh direnv git; do
   fi
 done
 
-# lineinfile (PyPI) is used for idempotent edits to zshenv / environment / rc files.
-if ! python3 -c 'import lineinfile' 2>/dev/null; then
-  packages+=(python3-pip)
-fi
-
 if ((${#packages[@]})); then
   apt-get update
   # Acquire::Retries covers dropped connections, not HTTP 400 from
@@ -93,38 +88,6 @@ if ((${#packages[@]})); then
   done
   rm -rf /var/lib/apt/lists/*
 fi
-
-if ! python3 -c 'import lineinfile' 2>/dev/null; then
-  pip3 install --break-system-packages --root-user-action=ignore 'lineinfile==0.5.2'
-fi
-
-# Idempotent line edits (Ansible-style). Optional 3rd arg is a regexp: when it
-# matches, the line is replaced; otherwise the line is inserted (BOF if $4=bof).
-lineinfile() {
-  local file="$1" line="$2" regexp="${3:-}" where="${4:-eof}"
-  LINE="$line" REGEXP="$regexp" WHERE="$where" FILE="$file" python3 - <<'PY'
-import os
-from lineinfile import AtBOF, add_line_to_file
-
-path = os.environ["FILE"]
-line = os.environ["LINE"]
-regexp = os.environ["REGEXP"] or None
-inserter = AtBOF() if os.environ["WHERE"] == "bof" else None
-add_line_to_file(path, line, regexp=regexp, inserter=inserter, create=True)
-PY
-}
-
-# Drop install-only OP flag left by older agent-containers installs.
-remove_op_integration_lines() {
-  local file="$1"
-  [[ -f "$file" ]] || return 0
-  FILE="$file" python3 - <<'PY'
-import os
-from lineinfile import remove_lines_from_file
-
-remove_lines_from_file(os.environ["FILE"], r"^(export )?OP_INTEGRATION_DISABLED=")
-PY
-}
 
 ########################################################
 # DOCKER DAEMON CONFIG
@@ -177,6 +140,43 @@ export MISE_ENV=dev,extras
 if ! command -v mise >/dev/null 2>&1; then
   curl --retry 3 --retry-delay 5 -fsSL https://mise.run | MISE_INSTALL_MUSL=1 MISE_INSTALL_PATH=/usr/local/bin/mise sh
 fi
+
+# lineinfile is only needed for the rc/environment edits below — after mise.
+# Use the pypi backend (not system pip / PEP 668 --break-system-packages).
+LINEINFILE_SPEC=pypi:lineinfile@0.5.2
+mkdir -p "$HOME/.local/state/mise" "$HOME/.local/share/mise"
+chown -R ubuntu:ubuntu "$HOME/.local"
+sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install "$LINEINFILE_SPEC"
+
+# Idempotent line edits (Ansible-style). Optional 3rd arg is a regexp: when it
+# matches, the line is replaced; otherwise the line is inserted (BOF if $4=bof).
+# HOME stays the ubuntu user so mise exec finds the pypi tool install above.
+lineinfile() {
+  local file="$1" line="$2" regexp="${3:-}" where="${4:-eof}"
+  LINE="$line" REGEXP="$regexp" WHERE="$where" FILE="$file" \
+    mise exec "$LINEINFILE_SPEC" -- python3 - <<'PY'
+import os
+from lineinfile import AtBOF, add_line_to_file
+
+path = os.environ["FILE"]
+line = os.environ["LINE"]
+regexp = os.environ["REGEXP"] or None
+inserter = AtBOF() if os.environ["WHERE"] == "bof" else None
+add_line_to_file(path, line, regexp=regexp, inserter=inserter, create=True)
+PY
+}
+
+# Drop install-only OP flag left by older agent-containers installs.
+remove_op_integration_lines() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+  FILE="$file" mise exec "$LINEINFILE_SPEC" -- python3 - <<'PY'
+import os
+from lineinfile import remove_lines_from_file
+
+remove_lines_from_file(os.environ["FILE"], r"^(export )?OP_INTEGRATION_DISABLED=")
+PY
+}
 
 # System zshenv: MISE_ENV + shims for all zsh invocations.
 lineinfile /etc/zsh/zshenv \
