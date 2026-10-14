@@ -190,9 +190,6 @@ touch "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config" "$HOME/.local"
 
-# Global tools (uv + lineinfile; gh if declared). pypi backend needs uv.
-sudo -n -u ubuntu -H env MISE_ENV=dev,extras mise install
-
 # System zshenv snippet: local file when present (image build, mounted tests),
 # otherwise the copy published next to install.sh on master (curl | bash).
 zshenv_snippet=/etc/zsh/agent-containers.zshenv
@@ -206,6 +203,56 @@ else
     -o "$zshenv_snippet"
   chmod 0644 "$zshenv_snippet"
 fi
+
+# lineinfile (via mise exec as ubuntu) edits these; keep root:ubuntu like /etc/mise.
+touch /etc/zsh/zshenv /etc/environment
+chown root:ubuntu /etc/zsh/zshenv /etc/environment
+chmod 0664 /etc/zsh/zshenv /etc/environment
+
+########################################################
+# UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
+########################################################
+# Mise install/exec must never run as root: tools land under ubuntu's
+# ~/.local/share/mise, and root mise exec leaves root-owned files there
+# (and can auto-install as uid 0). All mise install + mise exec (including
+# lineinfile rc edits) run in this ubuntu subshell.
+#
+# python-starter-template's setup starts docker compose (`docker_up`) and
+# seeds the DB. This script runs while the snapshot is built, before
+# dockerd. `--skip-services` omits those steps. `start.sh` runs `just setup`
+# on container start. Probe `just --usage setup` so a recipe without that
+# flag still runs as `just setup`.
+#
+# OP_INTEGRATION_DISABLED is install-process-only (not in start.sh).
+
+sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras \
+  bash -euo pipefail -s ubuntu-setup "$PWD" "$zshenv_snippet" <<'UBUNTU_SETUP'
+cd "$1"
+zshenv_snippet="$2"
+
+if [ "$(id -u)" -eq 0 ]; then
+  echo "mise install must not run as root" >&2
+  exit 1
+fi
+
+# Shared NSS DB for Chromium / localias (certutil from libnss3-tools).
+# The package does not create this; without it, trust-store installs fail.
+mkdir -p "$HOME/.pki/nssdb"
+if [ ! -f "$HOME/.pki/nssdb/cert9.db" ]; then
+  certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
+fi
+
+if [ -f .envrc ]; then
+  echo "Trusting .envrc in $PWD"
+  direnv allow .
+fi
+
+# Lock + install system/global tools (lockfile: /etc/mise/mise.lock), plus
+# project tools when a project mise config is present.
+# Global tools include uv + lineinfile (gh if declared); pypi needs uv.
+mise lock -g --platform linux-x64,linux-arm64
+mise install
+
 mise exec -- lineinfile add --create \
   --line "source ${zshenv_snippet}" \
   --regexp 'agent-containers\.zshenv' \
@@ -245,59 +292,25 @@ mise exec -- lineinfile add --create \
   --line 'eval "$(direnv hook zsh)"' --regexp 'direnv hook zsh' \
   "$HOME/.zshrc"
 
-########################################################
-# UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
-########################################################
-# Mise, direnv's allow database, and gh extensions belong to ubuntu.
-# Run the user-space setup in a single ubuntu subshell in the project root ($PWD).
-#
-# python-starter-template's setup starts docker compose (`docker_up`) and
-# seeds the DB. This script runs while the snapshot is built, before
-# dockerd. `--skip-services` omits those steps. `start.sh` runs `just setup`
-# on container start. Probe `just --usage setup` so a recipe without that
-# flag still runs as `just setup`.
-#
-# OP_INTEGRATION_DISABLED is install-process-only (not in start.sh).
+# Extensions install into $HOME/.local/share/gh/extensions.
+# Do not use `gh extension list`: unauthenticated gh exits nonzero.
+gh_ai_pr_dir="$HOME/.local/share/gh/extensions/gh-ai-pr"
+if [ ! -d "$gh_ai_pr_dir" ]; then
+  mise exec -- gh extension install iloveitaly/gh-ai-pr
+fi
 
-sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras bash -euo pipefail -c '
-  cd "$1"
-
-  # Shared NSS DB for Chromium / localias (certutil from libnss3-tools).
-  # The package does not create this; without it, trust-store installs fail.
-  mkdir -p "$HOME/.pki/nssdb"
-  if [ ! -f "$HOME/.pki/nssdb/cert9.db" ]; then
-    certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
-  fi
-
-  if [ -f .envrc ]; then
-    echo "Trusting .envrc in $PWD"
-    direnv allow .
-  fi
-
-  # Lock + install system/global tools (lockfile: /etc/mise/mise.lock), plus
-  # project tools when a project mise config is present.
-  mise lock -g --platform linux-x64,linux-arm64
-  mise install
-
-  # Extensions install into $HOME/.local/share/gh/extensions.
-  # Do not use `gh extension list`: unauthenticated gh exits nonzero.
-  gh_ai_pr_dir="$HOME/.local/share/gh/extensions/gh-ai-pr"
-  if [ ! -d "$gh_ai_pr_dir" ]; then
-    mise exec -- gh extension install iloveitaly/gh-ai-pr
-  fi
-
-  if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-    if ! mise which just >/dev/null 2>&1; then
-      echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
-    elif usage="$(mise exec -- just --usage setup 2>/dev/null)"; then
-      setup_cmd=(just setup)
-      if grep -q -- "--skip-services" <<<"$usage"; then
-        setup_cmd+=(--skip-services)
-      fi
-      echo "Running ${setup_cmd[*]} in $PWD"
-      mise exec -- direnv exec . "${setup_cmd[@]}"
-    else
-      echo "justfile found in $PWD but no setup recipe; skipping"
+if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
+  if ! mise which just >/dev/null 2>&1; then
+    echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
+  elif usage="$(mise exec -- just --usage setup 2>/dev/null)"; then
+    setup_cmd=(just setup)
+    if grep -q -- "--skip-services" <<<"$usage"; then
+      setup_cmd+=(--skip-services)
     fi
+    echo "Running ${setup_cmd[*]} in $PWD"
+    mise exec -- direnv exec . "${setup_cmd[@]}"
+  else
+    echo "justfile found in $PWD but no setup recipe; skipping"
   fi
-' bash "$PWD"
+fi
+UBUNTU_SETUP
