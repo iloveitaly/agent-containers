@@ -225,8 +225,9 @@ chmod 0664 /etc/zsh/zshenv /etc/environment
 #
 # OP_INTEGRATION_DISABLED is install-process-only (not in start.sh).
 
+# bash -s: remaining args are $1.. (not $0). Heredoc is the script body.
 sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras \
-  bash -euo pipefail -s ubuntu-setup "$PWD" "$zshenv_snippet" <<'UBUNTU_SETUP'
+  bash -euo pipefail -s "$PWD" "$zshenv_snippet" <<'UBUNTU_SETUP'
 cd "$1"
 zshenv_snippet="$2"
 
