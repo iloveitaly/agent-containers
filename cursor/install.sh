@@ -239,6 +239,11 @@ EOF
 chmod 0644 "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv"
 chown -R ubuntu:ubuntu "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.zshenv" "$HOME/.config"
 
+# Lock system tools as root: `mise lock -g` writes /etc/mise/mise.lock next to
+# the system config, which the ubuntu user cannot create.
+mise lock -g --platform linux-x64,linux-arm64
+chmod 0644 /etc/mise/mise.lock
+
 ########################################################
 # UBUNTU TOOLS & OPTIONAL PROJECT `just setup`
 ########################################################
@@ -262,9 +267,7 @@ sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras bash -euo
   fi
 
   # Install system/global mise tools, plus project tools when a project mise
-  # config is present. Lock under the user config dir so projects with
-  # `locked = true` (e.g. railpack) do not fail resolving uv/gh.
-  mise lock -g --platform linux-x64,linux-arm64
+  # config is present. Lockfile lives in /etc/mise (written as root above).
   mise install
 
   # Extensions install into $HOME/.local/share/gh/extensions.
