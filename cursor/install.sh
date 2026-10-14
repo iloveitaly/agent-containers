@@ -192,10 +192,12 @@ sudo -n -u ubuntu -H env MISE_ENV=dev,extras bash -euo pipefail -c '
 # Idempotent line edits (Ansible-style). Optional 3rd arg is a regexp: when it
 # matches, the line is replaced; otherwise the line is inserted (BOF if $4=bof).
 # HOME stays the ubuntu user so mise exec finds the pypi tool install above.
+# `mise x` (not bare `mise exec`): lineinfile is install-only and not in
+# /etc/mise/config.toml, so it must be activated for the one-shot python.
 lineinfile() {
   local file="$1" line="$2" regexp="${3:-}" where="${4:-eof}"
   LINE="$line" REGEXP="$regexp" WHERE="$where" FILE="$file" \
-    mise exec "$LINEINFILE_SPEC" -- python3 - <<'PY'
+    mise x "$LINEINFILE_SPEC" -- python3 - <<'PY'
 import os
 from lineinfile import AtBOF, add_line_to_file
 
@@ -211,7 +213,7 @@ PY
 remove_op_integration_lines() {
   local file="$1"
   [[ -f "$file" ]] || return 0
-  FILE="$file" mise exec "$LINEINFILE_SPEC" -- python3 - <<'PY'
+  FILE="$file" mise x "$LINEINFILE_SPEC" -- python3 - <<'PY'
 import os
 from lineinfile import remove_lines_from_file
 
