@@ -92,6 +92,10 @@ test-just-setup: build-cursor
 	  test -f /etc/mise/miserc.toml
 	  grep -q "trusted_config_paths" /etc/mise/config.toml
 	  grep -qxF "env = [\"dev\", \"extras\"]" /etc/mise/miserc.toml
+	  # mise install/exec must never run as root (no root-owned tool files).
+	  ! find /home/ubuntu/.local/share/mise -user root 2>/dev/null | grep .
+	  test "$(stat -c "%U:%G %a" /etc/zsh/zshenv)" = "root:ubuntu 664"
+	  test "$(stat -c "%U:%G %a" /etc/environment)" = "root:ubuntu 664"
 	'
 
 	# No justfile: no marker.
