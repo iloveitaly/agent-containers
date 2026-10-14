@@ -82,6 +82,9 @@ test-just-setup: build-cursor
 	  grep -qF "source /etc/zsh/agent-containers.zshenv" /etc/zsh/zshenv
 	  grep -qxF "export MISE_ENV=dev,extras" /etc/zsh/agent-containers.zshenv
 	  grep -qF "mise activate zsh --shims" /etc/zsh/agent-containers.zshenv
+	  grep -qF "DIRENV_DIR" /etc/zsh/agent-containers.zshenv
+	  # Already-loaded direnv must not be re-exported (DIRENV_DIR stays put).
+	  test "$(DIRENV_DIR=-/already zsh -c "print -r -- \"\$DIRENV_DIR\"")" = "-/already"
 	  grep -qxF "MISE_ENV=dev,extras" /etc/environment
 	  ! grep -q "OP_INTEGRATION_DISABLED" /etc/environment
 	  ! grep -q "OP_INTEGRATION_DISABLED" /home/ubuntu/.zshenv /home/ubuntu/.bashrc /etc/zsh/zshenv

@@ -7,3 +7,12 @@
 # (.config/mise.dev.toml and .config/mise.extras.toml).
 export MISE_ENV=dev,extras
 eval "$(mise activate zsh --shims)"
+
+# Non-interactive shells never source ~/.zshrc, so the direnv hook there does not run.
+# Login shells are included: Cloud Agent commands are login and non-interactive.
+# DIRENV_DIR is set once direnv has exported into this session (including a parent
+# shell). DIRENV_IN_ENVRC is set while direnv is evaluating an .envrc. Either means
+# direnv is already in play — do not export again.
+if [[ ! -o interactive && -z "${DIRENV_DIR:-}" && -z "${DIRENV_IN_ENVRC:-}" ]] && command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv export zsh)"
+fi
