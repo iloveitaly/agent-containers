@@ -153,6 +153,8 @@ chmod 0775 /etc/mise
 trusted_config_paths = ["/workspace"]
 
 [tools]
+# python: required for locked pypi:* graph installs (e.g. lineinfile)
+python = "3"
 uv = "latest"
 "pypi:lineinfile" = "latest"
 EOF
