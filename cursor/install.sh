@@ -73,6 +73,12 @@ for cmd in zsh direnv git; do
   fi
 done
 
+# NSS cert tools (certutil). Not on Cursor's default image; required by
+# localias (and mkcert / Chromium NSS trust-store workflows).
+if ! command -v certutil >/dev/null 2>&1; then
+  packages+=(libnss3-tools)
+fi
+
 if ((${#packages[@]})); then
   apt-get update
   # Acquire::Retries covers dropped connections, not HTTP 400 from
@@ -255,6 +261,13 @@ mise exec -- lineinfile add --create \
 
 sudo -n -u ubuntu -H env OP_INTEGRATION_DISABLED=1 MISE_ENV=dev,extras bash -euo pipefail -c '
   cd "$1"
+
+  # Shared NSS DB for Chromium / localias (certutil from libnss3-tools).
+  # The package does not create this; without it, trust-store installs fail.
+  mkdir -p "$HOME/.pki/nssdb"
+  if [ ! -f "$HOME/.pki/nssdb/cert9.db" ]; then
+    certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
+  fi
 
   if [ -f .envrc ]; then
     echo "Trusting .envrc in $PWD"
