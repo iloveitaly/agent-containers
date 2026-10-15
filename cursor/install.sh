@@ -180,17 +180,19 @@ env = ["dev", "extras"]
 EOF
 chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
 
-# Drop user-level copies from older installs so they cannot override /etc/mise
-# during the system mise install below. A later linux-devbox rsync installs the
-# dotfiles ~/.config/mise/config.toml; keep that file when this ref was already
-# synced so a second install.sh does not wipe it.
+# Drop user-level copies so they cannot override /etc/mise during the system
+# mise install below. After linux-devbox, ~/.config/mise/config.toml is the
+# dotfiles tool list. On a later install.sh, hold that file aside for the
+# system install (it lists tools that do not install on this image) and put
+# it back before the stamp check skips a second linux-devbox run.
 dotfiles_ref="${DOTFILES_REF:-master}"
 dotfiles_stamp=/var/lib/agent-containers/dotfiles-ref
-if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
-  rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
-else
-  rm -f "$HOME/.config/mise/miserc.toml"
+dotfiles_config_hold=""
+if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" = "$dotfiles_ref" ] && [ -f "$HOME/.config/mise/config.toml" ]; then
+  dotfiles_config_hold="$(mktemp)"
+  mv "$HOME/.config/mise/config.toml" "$dotfiles_config_hold"
 fi
+rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
 
 mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise" "$HOME/.local/share/mise"
 cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
@@ -338,6 +340,12 @@ if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
   fi
 fi
 UBUNTU_SETUP
+
+if [ -n "$dotfiles_config_hold" ]; then
+  mkdir -p "$HOME/.config/mise"
+  mv "$dotfiles_config_hold" "$HOME/.config/mise/config.toml"
+  chown ubuntu:ubuntu "$HOME/.config/mise/config.toml"
+fi
 
 ########################################################
 # DOTFILES (iloveitaly/dotfiles install/linux-devbox.sh)
