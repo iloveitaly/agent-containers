@@ -352,6 +352,10 @@ UBUNTU_SETUP
 # script's `set -e` then fails `zinit update`. Force a real TERM and do not
 # pass -E. Forward a GitHub token when one is in this environment; Cursor
 # agents already satisfy `mise token github` via ~/.config/gh/hosts.yml.
+#
+# install/mise/linux.toml sets libc=musl. On this glibc image that makes
+# node and python fail to exec, and ast-grep has no musl asset, so
+# `mise install` exits 1. MISE_LIBC=gnu overrides that setting here.
 
 if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   rm -rf /opt/dotfiles
@@ -360,7 +364,7 @@ if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   if ! sudo -n -u ubuntu test -w /usr/local/bin/mise; then
     chown ubuntu:ubuntu /usr/local/bin/mise
   fi
-  dotfiles_env=(TERM=xterm-256color)
+  dotfiles_env=(TERM=xterm-256color MISE_LIBC=gnu)
   if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
     dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
   elif [ -n "${GITHUB_TOKEN:-}" ]; then
