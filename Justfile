@@ -197,7 +197,9 @@ test-just-setup: build-cursor
 	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
 	    sudo chown -R ubuntu:ubuntu /opt/start-app
-	    mise install
+	    # Project just only. A bare `mise install` also builds the dotfiles
+	    # global tool list, including musl node/python/ast-grep that fail here.
+	    mise install just
 	    bash /tmp/start.sh
 	  '
 	# FROM_DIRENV, empty OP_INTEGRATION_DISABLED (not set at start), skip_services default.
