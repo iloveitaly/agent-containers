@@ -364,6 +364,10 @@ UBUNTU_SETUP
 # binary and execs the bare name (ENOENT). A wrapper in front of mise runs
 # that binary for this one command. `mise self-update` would replace the
 # wrapper, so the wrapper ignores it; /usr/local/bin/mise.real stays.
+#
+# linux-devbox.sh then runs `zsh -lc`, which is not interactive. .zshrc calls
+# `setopt localoptions monitor`, and that errors in a non-interactive shell
+# and aborts the zinit update. /usr/local/bin/zsh turns that one -lc into -lic.
 
 if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   rm -rf /opt/dotfiles
@@ -387,6 +391,15 @@ fi
 exec -a "$0" /usr/local/bin/mise.real "$@"
 EOF
   chmod 755 /usr/local/bin/mise
+  cat > /usr/local/bin/zsh << 'EOF'
+#!/bin/bash
+if [ "$1" = "-lc" ]; then
+  shift
+  exec /usr/bin/zsh -lic "$@"
+fi
+exec /usr/bin/zsh "$@"
+EOF
+  chmod 755 /usr/local/bin/zsh
   dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=aiautocommit,pipx:aiautocommit,pypi:aiautocommit,ast-grep,azure-cli,bun,elixir,erlang,node,python,ruby)
   if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
     dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
