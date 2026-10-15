@@ -355,10 +355,11 @@ UBUNTU_SETUP
 #
 # install/mise/linux.toml sets libc=musl, and the dotfiles lockfile matches
 # that. On this glibc image the unofficial musl node and python builds do not
-# exec, and ast-grep publishes no musl asset, so `mise install` exits 1.
-# MISE_DISABLE_TOOLS replaces the config list rather than appending, so repeat
-# linux.toml's erlang/elixir/ruby/bun disables and add the three that fail.
-# MISE_LIBC=gnu is worse: aqua tools in the lockfile only publish musl assets.
+# exec, and ast-grep publishes no musl asset. pipx azure-cli and aiautocommit
+# then fail because the python shim exits. MISE_DISABLE_TOOLS replaces the
+# config list rather than appending, so repeat linux.toml's erlang/elixir/ruby/bun
+# disables and add those tools. MISE_LIBC=gnu is worse: aqua tools in the
+# lockfile only publish musl assets.
 
 if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   rm -rf /opt/dotfiles
@@ -367,7 +368,7 @@ if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   if ! sudo -n -u ubuntu test -w /usr/local/bin/mise; then
     chown ubuntu:ubuntu /usr/local/bin/mise
   fi
-  dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=ast-grep,bun,elixir,erlang,node,python,ruby)
+  dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=aiautocommit,ast-grep,azure-cli,bun,elixir,erlang,node,python,ruby)
   if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
     dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
   elif [ -n "${GITHUB_TOKEN:-}" ]; then
