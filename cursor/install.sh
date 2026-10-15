@@ -346,12 +346,11 @@ UBUNTU_SETUP
 # in /etc/mise and /etc/zsh/zshenv, which this rsync does not touch.
 # Do not install another mise, and do not write ~/.config/mise/miserc.toml.
 #
-# linux-devbox.sh runs `mise self-update` and `zsh -lc` as ubuntu. The mise
-# binary must be writable by ubuntu. TERM=dumb (and CURSOR_AGENT, which sudo
-# would keep only with -E) makes .zshrc return before zinit loads, and the
-# script's `set -e` then fails `zinit update`. Force a real TERM and do not
-# pass -E. Forward a GitHub token when one is in this environment; Cursor
-# agents already satisfy `mise token github` via ~/.config/gh/hosts.yml.
+# TERM=dumb (and CURSOR_AGENT, which sudo would keep only with -E) makes
+# .zshrc return before zinit loads, and the script's `set -e` then fails
+# `zinit update`. Force a real TERM and do not pass -E. Forward a GitHub
+# token when one is in this environment; Cursor agents already satisfy
+# `mise token github` via ~/.config/gh/hosts.yml.
 #
 # install/mise/linux.toml sets libc=musl, and the dotfiles lockfile matches
 # that. On this glibc image the unofficial musl node and python builds do not
@@ -360,14 +359,34 @@ UBUNTU_SETUP
 # config list rather than appending, so repeat linux.toml's erlang/elixir/ruby/bun
 # disables and add those tools. MISE_LIBC=gnu is worse: aqua tools in the
 # lockfile only publish musl assets.
+#
+# With that full tool set, `mise exec -- ya` does not resolve yazi's nested
+# binary and execs the bare name (ENOENT). A wrapper in front of mise runs
+# that binary for this one command. `mise self-update` would replace the
+# wrapper, so the wrapper ignores it; /usr/local/bin/mise.real stays.
 
 if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   rm -rf /opt/dotfiles
   git clone --depth 1 --branch "$dotfiles_ref" https://github.com/iloveitaly/dotfiles.git /opt/dotfiles
   chown -R ubuntu:ubuntu /opt/dotfiles
-  if ! sudo -n -u ubuntu test -w /usr/local/bin/mise; then
-    chown ubuntu:ubuntu /usr/local/bin/mise
+  if [ ! -x /usr/local/bin/mise.real ]; then
+    mv /usr/local/bin/mise /usr/local/bin/mise.real
   fi
+  cat > /usr/local/bin/mise << 'EOF'
+#!/bin/bash
+if [ "$1" = "self-update" ]; then
+  exit 0
+fi
+if [ "$1" = "exec" ] && [ "$2" = "--" ] && [ "$3" = "ya" ]; then
+  ya_bin=$(find "$HOME/.local/share/mise/installs/yazi" -type f -name ya -perm -111 2>/dev/null | head -1)
+  if [ -n "$ya_bin" ]; then
+    shift 3
+    exec "$ya_bin" "$@"
+  fi
+fi
+exec -a "$0" /usr/local/bin/mise.real "$@"
+EOF
+  chmod 755 /usr/local/bin/mise
   dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=aiautocommit,pipx:aiautocommit,pypi:aiautocommit,ast-grep,azure-cli,bun,elixir,erlang,node,python,ruby)
   if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
     dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
