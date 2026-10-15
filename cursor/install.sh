@@ -368,7 +368,7 @@ if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   if ! sudo -n -u ubuntu test -w /usr/local/bin/mise; then
     chown ubuntu:ubuntu /usr/local/bin/mise
   fi
-  dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=aiautocommit,ast-grep,azure-cli,bun,elixir,erlang,node,python,ruby)
+  dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=aiautocommit,pipx:aiautocommit,pypi:aiautocommit,ast-grep,azure-cli,bun,elixir,erlang,node,python,ruby)
   if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
     dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
   elif [ -n "${GITHUB_TOKEN:-}" ]; then
