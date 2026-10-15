@@ -26,7 +26,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY install.sh /tmp/install.sh
 COPY snippets/zshenv /tmp/snippets/zshenv
-RUN bash /tmp/install.sh && rm -rf /tmp/install.sh /tmp/snippets
+# linux-devbox.sh requires a GitHub token when gh is not already logged in.
+# Pass it as a BuildKit secret so it is not stored in the image:
+#   docker build --secret id=github_token,env=MISE_GITHUB_TOKEN ...
+# Cursor Cloud already has ~/.config/gh/hosts.yml, so the secret is optional.
+RUN --mount=type=secret,id=github_token,required=false \
+    bash -c 'if [ -s /run/secrets/github_token ]; then export MISE_GITHUB_TOKEN="$(cat /run/secrets/github_token)"; fi; bash /tmp/install.sh' \
+    && rm -rf /tmp/install.sh /tmp/snippets
 
 USER ubuntu
 WORKDIR /home/ubuntu

@@ -67,7 +67,9 @@ if ! command -v docker >/dev/null 2>&1; then
   )
 fi
 
-for cmd in zsh direnv git; do
+# rsync is required by iloveitaly/dotfiles install/linux-devbox.sh, which
+# syncs the home directory before its own apt install.
+for cmd in zsh direnv git rsync; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     packages+=("$cmd")
   fi
@@ -178,8 +180,17 @@ env = ["dev", "extras"]
 EOF
 chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
 
-# Drop user-level copies from older installs so they cannot override /etc/mise.
-rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
+# Drop user-level copies from older installs so they cannot override /etc/mise
+# during the system mise install below. A later linux-devbox rsync installs the
+# dotfiles ~/.config/mise/config.toml; keep that file when this ref was already
+# synced so a second install.sh does not wipe it.
+dotfiles_ref="${DOTFILES_REF:-master}"
+dotfiles_stamp=/var/lib/agent-containers/dotfiles-ref
+if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
+  rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
+else
+  rm -f "$HOME/.config/mise/miserc.toml"
+fi
 
 mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise" "$HOME/.local/share/mise"
 cat > "$HOME/.config/direnv/direnv.toml" <<'EOF'
@@ -300,8 +311,20 @@ if [ ! -d "$gh_ai_pr_dir" ]; then
   mise exec -- gh extension install iloveitaly/gh-ai-pr
 fi
 
+# linux-devbox installs just globally. That must not run every project
+# `setup` recipe. Require just in the project mise config.
+project_declares_just=false
+for mise_cfg in mise.toml .mise.toml .config/mise.toml; do
+  if [ -f "$mise_cfg" ] && grep -Eq '^[[:space:]]*"?just"?[[:space:]]*=' "$mise_cfg"; then
+    project_declares_just=true
+    break
+  fi
+done
+
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-  if ! mise which just >/dev/null 2>&1; then
+  if [ "$project_declares_just" != true ]; then
+    echo "justfile found in $PWD but just is not declared in the project mise config; skipping just setup"
+  elif ! mise which just >/dev/null 2>&1; then
     echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
   elif usage="$(mise exec -- just --usage setup 2>/dev/null)"; then
     setup_cmd=(just setup)
@@ -315,3 +338,46 @@ if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
   fi
 fi
 UBUNTU_SETUP
+
+########################################################
+# DOTFILES (iloveitaly/dotfiles install/linux-devbox.sh)
+########################################################
+# Mise is already at /usr/local/bin/mise. MISE_ENV and /workspace trust stay
+# in /etc/mise and /etc/zsh/zshenv, which this rsync does not touch.
+# Do not install another mise, and do not write ~/.config/mise/miserc.toml.
+#
+# linux-devbox.sh runs `mise self-update` and `zsh -lc` as ubuntu. The mise
+# binary must be writable by ubuntu. TERM=dumb (and CURSOR_AGENT, which sudo
+# would keep only with -E) makes .zshrc return before zinit loads, and the
+# script's `set -e` then fails `zinit update`. Force a real TERM and do not
+# pass -E. Forward a GitHub token when one is in this environment; Cursor
+# agents already satisfy `mise token github` via ~/.config/gh/hosts.yml.
+
+if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
+  rm -rf /opt/dotfiles
+  git clone --depth 1 --branch "$dotfiles_ref" https://github.com/iloveitaly/dotfiles.git /opt/dotfiles
+  chown -R ubuntu:ubuntu /opt/dotfiles
+  if ! sudo -n -u ubuntu test -w /usr/local/bin/mise; then
+    chown ubuntu:ubuntu /usr/local/bin/mise
+  fi
+  dotfiles_env=(TERM=xterm-256color)
+  if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
+    dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
+  elif [ -n "${GITHUB_TOKEN:-}" ]; then
+    dotfiles_env+=(MISE_GITHUB_TOKEN="$GITHUB_TOKEN")
+  fi
+  sudo -n -u ubuntu -H env "${dotfiles_env[@]}" bash /opt/dotfiles/install/linux-devbox.sh
+  mkdir -p /var/lib/agent-containers
+  printf '%s\n' "$dotfiles_ref" > "$dotfiles_stamp"
+fi
+
+# The rsync replaces ~/.config/direnv/direnv.toml with the dotfiles file
+# (strict_env, warn_timeout, no whitelist). Put /workspace back.
+direnv_toml="$HOME/.config/direnv/direnv.toml"
+mkdir -p "$(dirname "$direnv_toml")"
+if [ ! -f "$direnv_toml" ]; then
+  printf '%s\n' '[whitelist]' 'prefix = ["/workspace"]' > "$direnv_toml"
+elif ! grep -q '/workspace' "$direnv_toml"; then
+  printf '\n%s\n' '[whitelist]' 'prefix = ["/workspace"]' >> "$direnv_toml"
+fi
+chown ubuntu:ubuntu "$direnv_toml"
