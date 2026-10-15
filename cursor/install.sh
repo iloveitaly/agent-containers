@@ -419,6 +419,30 @@ EOF
   printf '%s\n' "$dotfiles_ref" > "$dotfiles_stamp"
 fi
 
+# Later `mise install` / `mise exec` read this config without MISE_DISABLE_TOOLS.
+# zz- sorts after linux.toml so this disable list wins.
+mkdir -p "$HOME/.config/mise/conf.d"
+cat > "$HOME/.config/mise/conf.d/zz-glibc.toml" << 'EOF'
+[settings]
+# linux.toml disables the compilers. These musl builds do not install on
+# this glibc image: ast-grep has no musl asset, and the musl node and python
+# builds do not exec (azure-cli and aiautocommit need that python).
+disable_tools = [
+  "erlang",
+  "elixir",
+  "ruby",
+  "bun",
+  "ast-grep",
+  "node",
+  "python",
+  "azure-cli",
+  "aiautocommit",
+  "pipx:aiautocommit",
+  "pypi:aiautocommit",
+]
+EOF
+chown ubuntu:ubuntu "$HOME/.config/mise/conf.d/zz-glibc.toml"
+
 # The rsync replaces ~/.config/direnv/direnv.toml with the dotfiles file
 # (strict_env, warn_timeout, no whitelist). Put /workspace back.
 direnv_toml="$HOME/.config/direnv/direnv.toml"
