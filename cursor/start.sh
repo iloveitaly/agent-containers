@@ -34,8 +34,20 @@ sudo -n -u ubuntu -H env MISE_ENV=dev,extras bash -euo pipefail -c '
     direnv allow .
   fi
 
+  # linux-devbox installs just globally. Require just in the project mise config
+  # so a global install does not run every project `setup` recipe.
+  project_declares_just=false
+  for mise_cfg in mise.toml .mise.toml .config/mise.toml; do
+    if [ -f "$mise_cfg" ] && grep -Eq '^[[:space:]]*"?just"?[[:space:]]*=' "$mise_cfg"; then
+      project_declares_just=true
+      break
+    fi
+  done
+
   if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-    if ! mise which just >/dev/null 2>&1; then
+    if [ "$project_declares_just" != true ]; then
+      echo "justfile found in $PWD but just is not declared in the project mise config; skipping just setup"
+    elif ! mise which just >/dev/null 2>&1; then
       echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
     elif mise exec -- just --usage setup >/dev/null 2>&1; then
       echo "Running just setup in $PWD"
