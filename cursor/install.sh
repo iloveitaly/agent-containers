@@ -365,9 +365,10 @@ UBUNTU_SETUP
 # that binary for this one command. `mise self-update` would replace the
 # wrapper, so the wrapper ignores it; /usr/local/bin/mise.real stays.
 #
-# linux-devbox.sh then runs `zsh -lc`, which is not interactive. .zshrc calls
-# `setopt localoptions monitor`, and that errors in a non-interactive shell
-# and aborts the zinit update. /usr/local/bin/zsh turns that one -lc into -lic.
+# linux-devbox.sh then runs `zsh -lc 'source ~/.zshrc && zinit update ...'`.
+# .zshrc's `setopt localoptions monitor` and an `unalias` both return non-zero
+# in that shell, so `source` fails and `&&` skips zinit. /usr/local/bin/zsh
+# reruns that one command as `source || true` and then the update.
 
 if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
   rm -rf /opt/dotfiles
@@ -393,9 +394,8 @@ EOF
   chmod 755 /usr/local/bin/mise
   cat > /usr/local/bin/zsh << 'EOF'
 #!/bin/bash
-if [ "$1" = "-lc" ]; then
-  shift
-  exec /usr/bin/zsh -lic "$@"
+if [ "$1" = "-lc" ] && [ "${2#*zinit update}" != "$2" ]; then
+  exec /usr/bin/zsh -fc 'source "$HOME/.zshrc" || true; zinit update --parallel --no-pager'
 fi
 exec /usr/bin/zsh "$@"
 EOF
