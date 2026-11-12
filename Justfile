@@ -1,8 +1,20 @@
 set shell := ["zsh", "-cu", "-o", "pipefail"]
 
-# Build the Cursor agent container image
+# Build the Cursor agent container image.
+# linux-devbox.sh needs a GitHub token when gh is not logged in inside the
+# image. Pass MISE_GITHUB_TOKEN or GITHUB_TOKEN; it is a BuildKit secret and
+# is not stored in the image. Without it, install.sh fails with linux-devbox's
+# own "GitHub token resolvable by mise is required" message.
+[script]
 build-cursor:
-	docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
+	set -eu
+	if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
+	  docker build --secret id=github_token,env=MISE_GITHUB_TOKEN -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
+	elif [ -n "${GITHUB_TOKEN:-}" ]; then
+	  MISE_GITHUB_TOKEN="$GITHUB_TOKEN" docker build --secret id=github_token,env=MISE_GITHUB_TOKEN -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
+	else
+	  docker build -t ubuntu-docker-mise-direnv:local -f cursor/Dockerfile cursor
+	fi
 
 # Re-run install.sh in the image against mounted fixtures (no justfile / no
 # setup recipe / setup without just via mise / setup with just via mise /
@@ -11,7 +23,8 @@ build-cursor:
 # from start.sh (mise exec, direnv exec, plain `just setup`).
 # Install markers record OP_INTEGRATION_DISABLED (install-process env only).
 # Start markers must not see that flag. Image build has no project justfile.
-# install.sh does not install just.
+# install.sh does not install just itself. linux-devbox.sh does install just
+# globally; setup still runs only when the project mise config declares just.
 [script]
 test-just-setup: build-cursor
 	tmp=$(mktemp -d)
@@ -33,7 +46,8 @@ test-just-setup: build-cursor
 	# Justfile, but no `setup` recipe. install.sh should skip it.
 	printf 'default:\n\techo hello\n' > "$tmp/nosetup/Justfile"
 
-	# `setup` recipe, and just is not a mise tool. install.sh should skip it.
+	# `setup` recipe, and just is not declared in the project mise config.
+	# linux-devbox installs just globally; that must not run this recipe.
 	printf 'setup:\n\techo ran-setup > marker\n' > "$tmp/setup/Justfile"
 
 	# `setup` recipe, and just is declared in mise. install.sh runs `mise install`
@@ -91,7 +105,25 @@ test-just-setup: build-cursor
 	  test -f /etc/mise/config.toml
 	  test -f /etc/mise/miserc.toml
 	  grep -q "trusted_config_paths" /etc/mise/config.toml
+	  grep -q "/workspace" /etc/mise/config.toml
 	  grep -qxF "env = [\"dev\", \"extras\"]" /etc/mise/miserc.toml
+	  command -v mise
+	  [ "$(command -v mise)" = /usr/local/bin/mise ]
+	  test -f /home/ubuntu/.config/mise/conf.d/linux.toml
+	  test -f /home/ubuntu/.config/mise/conf.d/server.toml
+	  grep -q "strict_env = true" /home/ubuntu/.config/direnv/direnv.toml
+	  grep -q "/workspace" /home/ubuntu/.config/direnv/direnv.toml
+	  grep -q fuse-overlayfs /etc/docker/daemon.json
+	  # Global just from dotfiles must not be treated as a project tool.
+	  mise which just >/dev/null
+	  agent_err="$(CURSOR_AGENT=1 zsh -c true 2>&1 >/dev/null)" || {
+	    printf "%s\n" "$agent_err" >&2
+	    exit 1
+	  }
+	  if printf "%s\n" "$agent_err" | grep -q "command not found: code"; then
+	    echo "agent zsh invoked the missing code CLI" >&2
+	    exit 1
+	  fi
 	  # mise install/exec must never run as root (no root-owned tool files).
 	  ! find /home/ubuntu/.local/share/mise -user root 2>/dev/null | grep .
 	  test "$(stat -c "%U:%G %a" /etc/zsh/zshenv)" = "root:ubuntu 664"
@@ -116,7 +148,7 @@ test-just-setup: build-cursor
 	  ubuntu-docker-mise-direnv:local bash /tmp/install.sh
 	[ ! -e "$tmp/nosetup/marker" ]
 
-	# Setup recipe, but just is not installed via mise: no marker.
+	# Setup recipe, but just is not declared in the project mise config: no marker.
 	docker run --rm \
 	  -v "$PWD/cursor/install.sh:/tmp/install.sh:ro" \
 	  -v "$PWD/cursor/snippets/zshenv:/tmp/snippets/zshenv:ro" \
@@ -165,7 +197,9 @@ test-just-setup: build-cursor
 	  ubuntu-docker-mise-direnv:local bash -c '
 	    set -euo pipefail
 	    sudo chown -R ubuntu:ubuntu /opt/start-app
-	    mise install
+	    # Project just only. A bare `mise install` also builds the dotfiles
+	    # global tool list, including musl node/python/ast-grep that fail here.
+	    mise install just
 	    bash /tmp/start.sh
 	  '
 	# FROM_DIRENV, empty OP_INTEGRATION_DISABLED (not set at start), skip_services default.

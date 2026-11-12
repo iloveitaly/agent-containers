@@ -67,7 +67,9 @@ if ! command -v docker >/dev/null 2>&1; then
   )
 fi
 
-for cmd in zsh direnv git; do
+# rsync is required by iloveitaly/dotfiles install/linux-devbox.sh, which
+# syncs the home directory before its own apt install.
+for cmd in zsh direnv git rsync; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     packages+=("$cmd")
   fi
@@ -178,7 +180,18 @@ env = ["dev", "extras"]
 EOF
 chmod 0644 /etc/mise/config.toml /etc/mise/miserc.toml
 
-# Drop user-level copies from older installs so they cannot override /etc/mise.
+# Drop user-level copies so they cannot override /etc/mise during the system
+# mise install below. After linux-devbox, ~/.config/mise/config.toml is the
+# dotfiles tool list. On a later install.sh, hold that file aside for the
+# system install (it lists tools that do not install on this image) and put
+# it back before the stamp check skips a second linux-devbox run.
+dotfiles_ref="${DOTFILES_REF:-master}"
+dotfiles_stamp=/var/lib/agent-containers/dotfiles-ref
+dotfiles_config_hold=""
+if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" = "$dotfiles_ref" ] && [ -f "$HOME/.config/mise/config.toml" ]; then
+  dotfiles_config_hold="$(mktemp)"
+  mv "$HOME/.config/mise/config.toml" "$dotfiles_config_hold"
+fi
 rm -f "$HOME/.config/mise/config.toml" "$HOME/.config/mise/miserc.toml"
 
 mkdir -p "$HOME/.config/direnv" "$HOME/.local/state/mise" "$HOME/.local/share/mise"
@@ -300,8 +313,20 @@ if [ ! -d "$gh_ai_pr_dir" ]; then
   mise exec -- gh extension install iloveitaly/gh-ai-pr
 fi
 
+# linux-devbox installs just globally. That must not run every project
+# `setup` recipe. Require just in the project mise config.
+project_declares_just=false
+for mise_cfg in mise.toml .mise.toml .config/mise.toml; do
+  if [ -f "$mise_cfg" ] && grep -Eq '^[[:space:]]*"?just"?[[:space:]]*=' "$mise_cfg"; then
+    project_declares_just=true
+    break
+  fi
+done
+
 if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
-  if ! mise which just >/dev/null 2>&1; then
+  if [ "$project_declares_just" != true ]; then
+    echo "justfile found in $PWD but just is not declared in the project mise config; skipping just setup"
+  elif ! mise which just >/dev/null 2>&1; then
     echo "justfile found in $PWD but just is not installed via mise; skipping just setup"
   elif usage="$(mise exec -- just --usage setup 2>/dev/null)"; then
     setup_cmd=(just setup)
@@ -315,3 +340,116 @@ if [ -f justfile ] || [ -f Justfile ] || [ -f .justfile ]; then
   fi
 fi
 UBUNTU_SETUP
+
+if [ -n "$dotfiles_config_hold" ]; then
+  mkdir -p "$HOME/.config/mise"
+  mv "$dotfiles_config_hold" "$HOME/.config/mise/config.toml"
+  chown ubuntu:ubuntu "$HOME/.config/mise/config.toml"
+fi
+
+########################################################
+# DOTFILES (iloveitaly/dotfiles install/linux-devbox.sh)
+########################################################
+# Mise is already at /usr/local/bin/mise. MISE_ENV and /workspace trust stay
+# in /etc/mise and /etc/zsh/zshenv, which this rsync does not touch.
+# Do not install another mise, and do not write ~/.config/mise/miserc.toml.
+#
+# TERM=dumb (and CURSOR_AGENT, which sudo would keep only with -E) makes
+# .zshrc return before zinit loads, and the script's `set -e` then fails
+# `zinit update`. Force a real TERM and do not pass -E. Forward a GitHub
+# token when one is in this environment; Cursor agents already satisfy
+# `mise token github` via ~/.config/gh/hosts.yml.
+#
+# install/mise/linux.toml sets libc=musl, and the dotfiles lockfile matches
+# that. On this glibc image the unofficial musl node and python builds do not
+# exec, and ast-grep publishes no musl asset. pipx azure-cli and aiautocommit
+# then fail because the python shim exits. MISE_DISABLE_TOOLS replaces the
+# config list rather than appending, so repeat linux.toml's erlang/elixir/ruby/bun
+# disables and add those tools. MISE_LIBC=gnu is worse: aqua tools in the
+# lockfile only publish musl assets.
+#
+# With that full tool set, `mise exec -- ya` does not resolve yazi's nested
+# binary and execs the bare name (ENOENT). A wrapper in front of mise runs
+# that binary for this one command. `mise self-update` would replace the
+# wrapper, so the wrapper ignores it; /usr/local/bin/mise.real stays.
+#
+# linux-devbox.sh then runs `zsh -lc 'source ~/.zshrc && zinit update ...'`.
+# .zshrc's `setopt localoptions monitor` and an `unalias` both return non-zero
+# in that shell, so `source` fails and `&&` skips zinit. /usr/local/bin/zsh
+# reruns that one command as `source || true` and then the update.
+
+if [ "$(cat "$dotfiles_stamp" 2>/dev/null || true)" != "$dotfiles_ref" ]; then
+  rm -rf /opt/dotfiles
+  git clone --depth 1 --branch "$dotfiles_ref" https://github.com/iloveitaly/dotfiles.git /opt/dotfiles
+  chown -R ubuntu:ubuntu /opt/dotfiles
+  if [ ! -x /usr/local/bin/mise.real ]; then
+    mv /usr/local/bin/mise /usr/local/bin/mise.real
+  fi
+  cat > /usr/local/bin/mise << 'EOF'
+#!/bin/bash
+if [ "$1" = "self-update" ]; then
+  exit 0
+fi
+if [ "$1" = "exec" ] && [ "$2" = "--" ] && [ "$3" = "ya" ]; then
+  ya_bin=$(find "$HOME/.local/share/mise/installs/yazi" -type f -name ya -perm -111 2>/dev/null | head -1)
+  if [ -n "$ya_bin" ]; then
+    shift 3
+    exec "$ya_bin" "$@"
+  fi
+fi
+exec -a "$0" /usr/local/bin/mise.real "$@"
+EOF
+  chmod 755 /usr/local/bin/mise
+  cat > /usr/local/bin/zsh << 'EOF'
+#!/bin/bash
+if [ "$1" = "-lc" ] && [ "${2#*zinit update}" != "$2" ]; then
+  exec /usr/bin/zsh -fc 'source "$HOME/.zshrc" || true; zinit update --parallel --no-pager'
+fi
+exec /usr/bin/zsh "$@"
+EOF
+  chmod 755 /usr/local/bin/zsh
+  dotfiles_env=(TERM=xterm-256color MISE_DISABLE_TOOLS=aiautocommit,pipx:aiautocommit,pypi:aiautocommit,ast-grep,azure-cli,bun,elixir,erlang,node,python,ruby)
+  if [ -n "${MISE_GITHUB_TOKEN:-}" ]; then
+    dotfiles_env+=(MISE_GITHUB_TOKEN="$MISE_GITHUB_TOKEN")
+  elif [ -n "${GITHUB_TOKEN:-}" ]; then
+    dotfiles_env+=(MISE_GITHUB_TOKEN="$GITHUB_TOKEN")
+  fi
+  sudo -n -u ubuntu -H env "${dotfiles_env[@]}" bash /opt/dotfiles/install/linux-devbox.sh
+  mkdir -p /var/lib/agent-containers
+  printf '%s\n' "$dotfiles_ref" > "$dotfiles_stamp"
+fi
+
+# Later `mise install` / `mise exec` read this config without MISE_DISABLE_TOOLS.
+# zz- sorts after linux.toml so this disable list wins.
+mkdir -p "$HOME/.config/mise/conf.d"
+cat > "$HOME/.config/mise/conf.d/zz-glibc.toml" << 'EOF'
+[settings]
+# linux.toml disables the compilers. These musl builds do not install on
+# this glibc image: ast-grep has no musl asset, and the musl node and python
+# builds do not exec (azure-cli and aiautocommit need that python).
+disable_tools = [
+  "erlang",
+  "elixir",
+  "ruby",
+  "bun",
+  "ast-grep",
+  "node",
+  "python",
+  "azure-cli",
+  "aiautocommit",
+  "pipx:aiautocommit",
+  "pypi:aiautocommit",
+]
+EOF
+chown ubuntu:ubuntu "$HOME/.config/mise/conf.d/zz-glibc.toml"
+
+# The rsync replaces ~/.config/direnv/direnv.toml with the dotfiles file
+# (strict_env, warn_timeout, no whitelist). Put /workspace back.
+direnv_toml="$HOME/.config/direnv/direnv.toml"
+mkdir -p "$(dirname "$direnv_toml")"
+if [ ! -f "$direnv_toml" ]; then
+  printf '%s\n' '[whitelist]' 'prefix = ["/workspace"]' > "$direnv_toml"
+elif ! grep -q '/workspace' "$direnv_toml"; then
+  printf '\n%s\n' '[whitelist]' 'prefix = ["/workspace"]' >> "$direnv_toml"
+fi
+chown ubuntu:ubuntu "$direnv_toml"
